@@ -1,0 +1,49 @@
+name: Build SkyCraft SKSE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-skse:
+    runs-on: windows-2025-vs2026
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git .tools/vcpkg
+          .\.tools\vcpkg\bootstrap-vcpkg.bat
+
+      - name: Configure
+        working-directory: skse
+        shell: pwsh
+        run: |
+          cmake --preset default
+
+      - name: Build
+        working-directory: skse
+        shell: pwsh
+        run: |
+          cmake --build --preset release
+
+      - name: Find SkyCraft.dll
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path . -Filter SkyCraft.dll -Recurse | ForEach-Object {
+            Write-Host $_.FullName
+          }
+
+      - name: Upload SkyCraft.dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: SkyCraft-SKSE-Windows
+          path: skse/build/**/SkyCraft.dll
+          if-no-files-found: error
