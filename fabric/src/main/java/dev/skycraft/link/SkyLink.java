@@ -326,6 +326,11 @@ public final class SkyLink {
 		public int teleportSeq;
 		public int viewportW, viewportH;
 		public float gameHour;
+		public float healthFrac;
+		public int placeFlags;
+		public float seaLevel;
+		public int rightHandKind, leftHandKind; // SkyCraft+ : Proto.HAND_*
+		public int sendToWorld; // SkyCraft+ : a save made in the Nether or the End: Proto.DIM_* to go to (0: none)
 
 		public boolean inGame() {
 			return (this.flags & SKY_IN_GAME) != 0;
@@ -335,8 +340,47 @@ public final class SkyLink {
 			return (this.flags & SKY_MENU_OPEN) != 0;
 		}
 
+		/** Skyrim drives its own player (Skyrim mode, furniture, riding, scenes): Minecraft follows. */
+		public boolean skyrimDrives() {
+			return (this.flags & SKY_DRIVES_PLAYER) != 0;
+		}
+
 		public boolean loading() {
 			return (this.flags & SKY_LOADING) != 0;
+		}
+
+		/** SkyCraft+ : hand ownership. Skyrim has something equipped in that hand: the hand is Skyrim's. */
+		public boolean rightHandSkyrim() {
+			return (this.flags & SKY_RIGHT_HAND_SKYRIM) != 0;
+		}
+
+		public boolean leftHandSkyrim() {
+			return (this.flags & SKY_LEFT_HAND_SKYRIM) != 0;
+		}
+
+		/** SkyCraft+ : a Skyrim menu has paused the game; Minecraft pauses too. */
+		public boolean skyrimPaused() {
+			return (this.flags & SKY_PAUSED) != 0;
+		}
+
+		/** SkyCraft+ : the Skyrim player is blocking with a Skyrim shield or weapon. */
+		public boolean skyrimBlocking() {
+			return (this.flags & SKY_BLOCKING) != 0;
+		}
+
+		/** SkyCraft+ : Skyrim's player is parked while Minecraft's is in the Nether or the End. */
+		public boolean parked() {
+			return (this.flags & SKY_PARKED) != 0;
+		}
+
+		/** SkyCraft+ : a Skyrim save in the open world was loaded: out of the Nether or the End to Skyrim's player. */
+		public boolean bringBack() {
+			return (this.flags & SKY_BRING_BACK) != 0;
+		}
+
+		/** SkyCraft+ : on a Skyrim horse in Skyrim's third-person camera: Skyrim draws Minecraft's body in the saddle. */
+		public boolean riding() {
+			return (this.flags & SKY_RIDING) != 0;
 		}
 	}
 
@@ -407,6 +451,12 @@ public final class SkyLink {
 			out.viewportW = s.get(JAVA_INT, b + SS_VIEWPORT_W);
 			out.viewportH = s.get(JAVA_INT, b + SS_VIEWPORT_H);
 			out.gameHour = s.get(JAVA_FLOAT, b + SS_GAME_HOUR);
+			out.healthFrac = s.get(JAVA_FLOAT, b + SS_HEALTH_FRAC);
+			out.placeFlags = s.get(JAVA_INT, b + SS_PLACE_FLAGS);
+			out.seaLevel = s.get(JAVA_FLOAT, b + SS_SEA_LEVEL);
+			out.rightHandKind = s.get(JAVA_BYTE, b + SS_HAND_KINDS) & 0xFF;
+			out.leftHandKind = s.get(JAVA_BYTE, b + SS_HAND_KINDS + 1) & 0xFF;
+			out.sendToWorld = s.get(JAVA_BYTE, b + SS_SEND_TO_WORLD) & 0xFF;
 			VarHandle.loadLoadFence();
 			int seq2 = (int) INT.getAcquire(s, b + SS_SEQ);
 			if (seq1 == seq2) {
@@ -447,6 +497,10 @@ public final class SkyLink {
 		public float tickMs = 50.0F;
 		public int cameraMode;
 		public float cameraDistance;
+		public float healthFrac;
+		public int dimension; // Proto.DIM_*
+		public int hands; // SkyCraft+ : hand mixing (Proto.MS_HANDS)
+		public int cursorSeq, cursorX, cursorY; // SkyCraft+ : controller inventory snapping
 	}
 
 	public static void writeMcState(McState st) {
@@ -491,6 +545,12 @@ public final class SkyLink {
 		s.set(JAVA_FLOAT, b + MS_TICK_MS, st.tickMs);
 		s.set(JAVA_INT, b + MS_CAMERA_MODE, st.cameraMode);
 		s.set(JAVA_FLOAT, b + MS_CAMERA_DISTANCE, st.cameraDistance);
+		s.set(JAVA_FLOAT, b + MS_HEALTH_FRAC, st.healthFrac);
+		s.set(JAVA_INT, b + MS_DIMENSION, st.dimension);
+		s.set(JAVA_INT, b + MS_HANDS, st.hands);
+		s.set(JAVA_INT, b + MS_CURSOR_SEQ, st.cursorSeq);
+		s.set(JAVA_INT, b + MS_CURSOR_X, st.cursorX);
+		s.set(JAVA_INT, b + MS_CURSOR_Y, st.cursorY);
 		INT.setRelease(s, b + MS_SEQ, seq + 2);
 	}
 
@@ -539,6 +599,128 @@ public final class SkyLink {
 	}
 
 	/** Seqlock read of the actor table. Returns false (leaving {@code out} empty) on a torn read. */
+	/** SkyCraft+ : one of the Skyrim player's projectiles (see SkyrimShot in the protocol). */
+	public record Shot(int id, int flags, float x0, float y0, float z0, float x1, float y1, float z1, float radius, float damage, float push) {
+	}
+
+	/** Seqlock read of the Skyrim player's projectiles; false if the link is down or Skyrim is mid-write. */
+	public static boolean readSkyrimShots(java.util.List<Shot> out) {
+		out.clear();
+		MemorySegment s = shm;
+		if (s == null) {
+			return false;
+		}
+		long b = OFF_SKYRIM_SHOTS;
+		for (int attempt = 0; attempt < 16; attempt++) {
+			int seq1 = (int) INT.getAcquire(s, b + SHOTS_SEQ);
+			if ((seq1 & 1) != 0) {
+				Thread.onSpinWait();
+				continue;
+			}
+			int count = Math.min(s.get(JAVA_INT, b + SHOTS_COUNT), MAX_SKYRIM_SHOTS);
+			for (int i = 0; i < count; i++) {
+				long r = b + SHOTS_RECORDS + (long) i * SKYRIM_SHOT_BYTES;
+				out.add(new Shot(s.get(JAVA_INT, r), s.get(JAVA_INT, r + 4), s.get(JAVA_FLOAT, r + 8), s.get(JAVA_FLOAT, r + 12), s.get(JAVA_FLOAT, r + 16),
+					s.get(JAVA_FLOAT, r + 20), s.get(JAVA_FLOAT, r + 24), s.get(JAVA_FLOAT, r + 28), s.get(JAVA_FLOAT, r + 32), s.get(JAVA_FLOAT, r + 36),
+					s.get(JAVA_FLOAT, r + 40)));
+			}
+			VarHandle.loadLoadFence();
+			if ((int) INT.getAcquire(s, b + SHOTS_SEQ) == seq1) {
+				return true;
+			}
+			out.clear();
+		}
+		return false;
+	}
+
+	/** SkyCraft+ : one of the Skyrim player's items, spells, shouts or powers (see SkyItem in the protocol). */
+	public record SkyItem(int formId, int kind, int sub, int material, int count, int flags, float weight, int value, float stat, float stat2, String name, int localId, String plugin) {
+		public boolean has(int flag) {
+			return (this.flags & flag) != 0;
+		}
+
+		/** The same thing in any load order (and with another game started): plugin and id within it. */
+		public boolean is(String plugin, int localId) {
+			return this.localId == localId && this.plugin.equalsIgnoreCase(plugin);
+		}
+	}
+
+	/** SkyCraft+ : Skyrim's inventory as a whole (see SkyInventory in the protocol). */
+	public record SkyInventory(int generation, int gold, float carried, float carryMax, java.util.List<SkyItem> items) {
+	}
+
+	/** SkyCraft+ : SkyInventory::generation, to see whether there's anything new to read (-1 if the link is down). */
+	public static int skyInventoryGeneration() {
+		MemorySegment s = shm;
+		return s == null ? -1 : (int) INT.getAcquire(s, OFF_SKY_INVENTORY + INV_GENERATION);
+	}
+
+	/** SkyCraft+ : seqlock read of Skyrim's inventory; null if the link is down or Skyrim kept writing. */
+	public static @org.jspecify.annotations.Nullable SkyInventory readSkyInventory() {
+		MemorySegment s = shm;
+		if (s == null) {
+			return null;
+		}
+		long b = OFF_SKY_INVENTORY;
+		for (int attempt = 0; attempt < 16; attempt++) {
+			int seq1 = (int) INT.getAcquire(s, b + INV_SEQ);
+			if ((seq1 & 1) != 0) {
+				Thread.onSpinWait();
+				continue;
+			}
+			int count = Math.clamp(s.get(JAVA_INT, b + INV_COUNT), 0, MAX_SKY_ITEMS);
+			java.util.List<SkyItem> items = new java.util.ArrayList<>(count);
+			for (int i = 0; i < count; i++) {
+				long r = b + INV_ITEMS + (long) i * SKY_ITEM_BYTES;
+				items.add(new SkyItem(s.get(JAVA_INT, r), Byte.toUnsignedInt(s.get(JAVA_BYTE, r + 4)), Byte.toUnsignedInt(s.get(JAVA_BYTE, r + 5)),
+					Byte.toUnsignedInt(s.get(JAVA_BYTE, r + 6)), s.get(JAVA_INT, r + 8), s.get(JAVA_INT, r + 12), s.get(JAVA_FLOAT, r + 16), s.get(JAVA_INT, r + 20),
+					s.get(JAVA_FLOAT, r + 24), s.get(JAVA_FLOAT, r + 28), readName(s, r + 32, SKY_ITEM_NAME_BYTES),
+					s.get(JAVA_INT, r + 128), readName(s, r + 132, SKY_ITEM_PLUGIN_BYTES)));
+			}
+			SkyInventory inventory = new SkyInventory(s.get(JAVA_INT, b + INV_GENERATION), s.get(JAVA_INT, b + INV_GOLD), s.get(JAVA_FLOAT, b + INV_CARRIED),
+				s.get(JAVA_FLOAT, b + INV_CARRY_MAX), items);
+			VarHandle.loadLoadFence();
+			if ((int) INT.getAcquire(s, b + INV_SEQ) == seq1) {
+				return inventory;
+			}
+		}
+		return null;
+	}
+
+	/** SkyCraft+ : SkyIcons::generation, to see whether any picture changed (-1 if the link is down). */
+	public static int skyIconsGeneration() {
+		MemorySegment s = shm;
+		return s == null ? -1 : (int) INT.getAcquire(s, OFF_SKY_ICONS + ICONS_GENERATION);
+	}
+
+	/** SkyCraft+ : a picture slot's seq (even when settled; -1 if the link is down) and key, without its pixels. */
+	public static long skyIconHeader(int slot) {
+		MemorySegment s = shm;
+		if (s == null) {
+			return -1L;
+		}
+		long b = OFF_SKY_ICONS + ICONS_SLOTS + slot * ICON_SLOT_BYTES;
+		int seq = (int) INT.getAcquire(s, b + ICON_SEQ);
+		return (long) seq << 32 | Integer.toUnsignedLong(s.get(JAVA_INT, b + ICON_KEY));
+	}
+
+	/** SkyCraft+ : seqlock read of a picture slot's pixels (RGBA) into out; returns its key, or 0 if it changed meanwhile. */
+	public static int readSkyIcon(int slot, byte[] out) {
+		MemorySegment s = shm;
+		if (s == null) {
+			return 0;
+		}
+		long b = OFF_SKY_ICONS + ICONS_SLOTS + slot * ICON_SLOT_BYTES;
+		int seq1 = (int) INT.getAcquire(s, b + ICON_SEQ);
+		if ((seq1 & 1) != 0) {
+			return 0;
+		}
+		int key = s.get(JAVA_INT, b + ICON_KEY);
+		MemorySegment.copy(s, JAVA_BYTE, b + ICON_RGBA, out, 0, Math.min(out.length, SKY_ICON_SIZE * SKY_ICON_SIZE * 4));
+		VarHandle.loadLoadFence();
+		return (int) INT.getAcquire(s, b + ICON_SEQ) == seq1 ? key : 0;
+	}
+
 	public static boolean readActors(java.util.List<Actor> out) {
 		out.clear();
 		MemorySegment s = shm;
@@ -569,6 +751,71 @@ public final class SkyLink {
 			out.clear();
 		}
 		return false;
+	}
+
+	// ---- SkyCraft+ : Skyrim items in Minecraft's containers ----------------------------------
+
+	/** One answer from Skyrim to a store request (see SkyStoreResult in the protocol header). */
+	public record StoreResult(int id, int status, int kind, int sub, int material, int count, float health, float charge, int soul, int flags, float weight,
+		int value, float stat, float stat2, int localId, String plugin, String name, int formId) {
+	}
+
+	private static int nextStoreId = 1;
+
+	/** Asks Skyrim to take something out of its inventory (STORE_TAKE) or put it back (STORE_GIVE); returns the request's id, or 0 if it couldn't be sent. */
+	public static synchronized int pushStoreRequest(int op, int formId, int count, float health, float charge, int soul, int localId, String plugin) {
+		MemorySegment s = shm;
+		if (s == null) {
+			return 0;
+		}
+		long base = OFF_SKY_STORE;
+		long head = s.get(JAVA_LONG, base + STORE_REQ_HEAD);
+		long tail = (long) LONG.getAcquire(s, base + STORE_REQ_TAIL);
+		if (head - tail >= STORE_REQUESTS) {
+			return 0;
+		}
+		int id = nextStoreId++;
+		long e = base + STORE_REQ_DATA + (head & (STORE_REQUESTS - 1)) * STORE_REQUEST_BYTES;
+		s.asSlice(e, STORE_REQUEST_BYTES).fill((byte) 0);
+		s.set(JAVA_INT, e, id);
+		s.set(JAVA_BYTE, e + 4, (byte) op);
+		s.set(JAVA_INT, e + 8, formId);
+		s.set(JAVA_INT, e + 12, count);
+		s.set(JAVA_FLOAT, e + 16, health);
+		s.set(JAVA_FLOAT, e + 20, charge);
+		s.set(JAVA_INT, e + 24, soul);
+		s.set(JAVA_INT, e + 28, localId);
+		byte[] name = plugin.getBytes(StandardCharsets.UTF_8);
+		for (int i = 0; i < Math.min(name.length, SKY_ITEM_PLUGIN_BYTES - 1); i++) {
+			s.set(JAVA_BYTE, e + 32 + i, name[i]);
+		}
+		LONG.setRelease(s, base + STORE_REQ_HEAD, head + 1);
+		return id;
+	}
+
+	/** Skyrim's answers since last time (empty if none, or the link is down). */
+	public static synchronized java.util.List<StoreResult> popStoreResults() {
+		MemorySegment s = shm;
+		if (s == null) {
+			return java.util.List.of();
+		}
+		long base = OFF_SKY_STORE;
+		long head = (long) LONG.getAcquire(s, base + STORE_RES_HEAD);
+		long tail = s.get(JAVA_LONG, base + STORE_RES_TAIL);
+		if (tail >= head) {
+			return java.util.List.of();
+		}
+		java.util.List<StoreResult> out = new java.util.ArrayList<>();
+		for (; tail < head; tail++) {
+			long r = base + STORE_RES_DATA + (tail & (STORE_RESULTS - 1)) * STORE_RESULT_BYTES;
+			out.add(new StoreResult(s.get(JAVA_INT, r), Byte.toUnsignedInt(s.get(JAVA_BYTE, r + 4)), Byte.toUnsignedInt(s.get(JAVA_BYTE, r + 5)),
+				Byte.toUnsignedInt(s.get(JAVA_BYTE, r + 6)), Byte.toUnsignedInt(s.get(JAVA_BYTE, r + 7)), s.get(JAVA_INT, r + 8), s.get(JAVA_FLOAT, r + 12),
+				s.get(JAVA_FLOAT, r + 16), s.get(JAVA_INT, r + 20), s.get(JAVA_INT, r + 24), s.get(JAVA_FLOAT, r + 28), s.get(JAVA_INT, r + 32),
+				s.get(JAVA_FLOAT, r + 36), s.get(JAVA_FLOAT, r + 40), s.get(JAVA_INT, r + 44), readName(s, r + 48, SKY_ITEM_PLUGIN_BYTES),
+				readName(s, r + 108, SKY_ITEM_NAME_BYTES), s.get(JAVA_INT, r + 204)));
+		}
+		LONG.setRelease(s, base + STORE_RES_TAIL, head);
+		return out;
 	}
 
 	private static String readName(MemorySegment s, long off, int max) {

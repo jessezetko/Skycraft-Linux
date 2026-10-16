@@ -55,6 +55,111 @@ public final class SkyCombat {
 	/** Skyrim damage is divided by this for Minecraft (a 15-damage bandit swing = 3 = 1.5 hearts). */
 	public static final float SKYRIM_TO_MC_DAMAGE = 5.0F;
 
+	/**
+	 * SkyCraft+ : mode switch. Skyrim drives the host's player (Skyrim mode, furniture, riding,
+	 * scenes): its Minecraft player only follows along and can't be hurt meanwhile.
+	 */
+	public static volatile boolean skyrimDrives;
+
+	/** SkyCraft+ : Skyrim combat on Minecraft mobs. The host's Skyrim player is blocking. */
+	public static volatile boolean skyrimBlocking;
+
+	/**
+	 * SkyCraft+ : Skyrim combat on Minecraft mobs. A Skyrim melee hit landed (its HitFrame): it hits
+	 * the nearest Minecraft mob in front of the player within reach and in sight, or with a power
+	 * attack everything in the arc, as the player's own attack (drops and experience). A bash
+	 * mostly pushes. Skyrim's NPCs aren't touched here: Skyrim hits those itself.
+	 */
+	public static void skyrimMelee(net.minecraft.server.level.ServerPlayer player, int flags, float damage, float reach) {
+		var level = player.level();
+		boolean power = (flags & Proto.SKYRIM_HIT_POWER) != 0;
+		boolean bash = (flags & Proto.SKYRIM_HIT_BASH) != 0;
+		var eye = player.getEyePosition();
+		var look = player.getLookAngle();
+		double arcCos = power ? 0.35 : 0.6; // about 70 / 53 degrees either side
+		java.util.List<LivingEntity> targets = new java.util.ArrayList<>();
+		for (LivingEntity e : level.getEntitiesOfClass(LivingEntity.class, player.getBoundingBox().inflate(reach + 1.0),
+			e -> e != player && e.isAlive() && !(e instanceof SkyrimActorEntity) && !(e instanceof net.minecraft.world.entity.player.Player))) {
+			var centre = e.getBoundingBox().getCenter();
+			var to = centre.subtract(eye);
+			double distance = Math.max(0.0, to.length() - e.getBbWidth() * 0.5);
+			if (distance <= reach && to.normalize().dot(look) >= arcCos && player.hasLineOfSight(e)) {
+				targets.add(e);
+			}
+		}
+		// SkyCraft+ : the End. Its crystals aren't living, but a sword breaks them as in Minecraft.
+		for (var crystal : level.getEntitiesOfClass(net.minecraft.world.entity.boss.enderdragon.EndCrystal.class, player.getBoundingBox().inflate(reach + 1.0), net.minecraft.world.entity.Entity::isAlive)) {
+			var to = crystal.getBoundingBox().getCenter().subtract(eye);
+			if (to.length() - 1.0 <= reach && to.normalize().dot(look) >= arcCos && player.hasLineOfSight(crystal)) {
+				crystal.hurtServer(level, player.damageSources().playerAttack(player), Math.max(1.0F, damage));
+			}
+		}
+		if (targets.isEmpty()) {
+			return;
+		}
+		targets.sort(java.util.Comparator.comparingDouble(e -> e.distanceToSqr(player)));
+		if (!power) {
+			targets = targets.subList(0, 1);
+		}
+		var source = player.damageSources().playerAttack(player);
+		double kx = net.minecraft.util.Mth.sin(player.getYRot() * (float) (Math.PI / 180.0));
+		double kz = -net.minecraft.util.Mth.cos(player.getYRot() * (float) (Math.PI / 180.0));
+		for (LivingEntity e : targets) {
+			if (e.hurtServer(level, source, damage)) {
+				e.knockback(bash ? 1.2 : power ? 0.8 : 0.4, kx, kz, source, damage);
+			}
+		}
+		SkyCraft.LOG.info("SkyCraft: Skyrim {} hit {} Minecraft mob(s) for {}", bash ? "bash" : power ? "power attack" : "attack", targets.size(), damage);
+	}
+
+	/** SkyCraft+ : hand ownership. The host's hands Skyrim holds (set by the client each frame). */
+	public static volatile boolean rightHandSkyrim, leftHandSkyrim;
+
+	/** SkyCraft+ : Skyrim weapons break blocks. What the host's Skyrim hands hold (Proto.HAND_*). */
+	public static volatile int rightHandKind, leftHandKind;
+
+	/**
+	 * SkyCraft+ : Skyrim weapons break blocks. The Minecraft tool the Skyrim weapon in this hand
+	 * mines as (SkyWeaponTools.tool), or empty: Minecraft's hand, or nothing that mines.
+	 */
+	public static net.minecraft.world.item.ItemStack skyrimTool(net.minecraft.world.entity.player.Player player, net.minecraft.world.InteractionHand hand) {
+		if (!(player instanceof net.minecraft.server.level.ServerPlayer sp) || !skyrimHolds(player, hand)) {
+			return net.minecraft.world.item.ItemStack.EMPTY;
+		}
+		var main = player.getMainArm();
+		boolean right = (hand == net.minecraft.world.InteractionHand.MAIN_HAND ? main : main.getOpposite()) == net.minecraft.world.entity.HumanoidArm.RIGHT;
+		int kind;
+		if (dev.skycraft.net.SkyNet.isHost(sp)) {
+			kind = right ? rightHandKind : leftHandKind;
+		} else {
+			int hands = dev.skycraft.net.SkyNet.guestHandsAndKinds(sp);
+			kind = right ? (hands >> 8) & 0xFF : (hands >> 16) & 0xFF;
+		}
+		return SkyWeaponTools.tool(kind);
+	}
+
+	public static boolean skyrimHolds(net.minecraft.world.entity.player.Player player, net.minecraft.world.InteractionHand hand) {
+		if (!(player instanceof net.minecraft.server.level.ServerPlayer sp)) {
+			return false;
+		}
+		// SkyCraft+ : multiplayer. A guest's own Skyrim hands, as their client told the server.
+		boolean right, left;
+		if (dev.skycraft.net.SkyNet.isHost(sp)) {
+			right = rightHandSkyrim;
+			left = leftHandSkyrim;
+		} else {
+			int hands = dev.skycraft.net.SkyNet.guestHands(sp);
+			right = (hands & 1) != 0;
+			left = (hands & 2) != 0;
+		}
+		if (!(right || left)) {
+			return false;
+		}
+		var main = player.getMainArm();
+		var arm = hand == net.minecraft.world.InteractionHand.MAIN_HAND ? main : main.getOpposite();
+		return arm == net.minecraft.world.entity.HumanoidArm.RIGHT ? right : left;
+	}
+
 	private static final Map<Integer, SkyrimActorEntity> PROXIES = new HashMap<>();
 	private static final List<SkyLink.Actor> ACTORS = new ArrayList<>();
 

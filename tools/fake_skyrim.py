@@ -14,7 +14,7 @@ import time
 import zlib
 
 MAGIC = 0x43594B53
-VERSION = 11
+VERSION = 30
 NAME = os.environ.get("SKYCRAFT_LINK", "Local\\SkyCraft_v1")  # fake_guest.py runs one beside a real Skyrim
 # Linux bridge: same layout in a file both the native Minecraft and Skyrim-under-Proton can mmap.
 # Overridden with SKYCRAFT_LINK_FILE=<path>. Windows builds ignore this (named mapping above).

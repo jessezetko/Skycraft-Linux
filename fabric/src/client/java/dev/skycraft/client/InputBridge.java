@@ -56,6 +56,7 @@ public final class InputBridge {
 				cursorY = b;
 				minecraft.mouseHandler.onMove(handle, a, b, dx, dy);
 			}
+			case Proto.IN_SLOT_JUMP -> slotJump(minecraft, handle, a, b);  // SkyCraft+ : controller inventory snapping
 			case Proto.IN_TEXT -> {
 				if (minecraft.gui.screen() != null) {
 					minecraft.keyboardHandler.textInput(handle, new String(Character.toChars(a)));
@@ -69,9 +70,81 @@ public final class InputBridge {
 					minecraft.gui.setScreen(new PauseScreen(true));
 				}
 			}
+			case Proto.IN_USE -> SkyClient.useBlockInView(minecraft);
+			// SkyCraft+ : a Skyrim healing spell or potion heals Minecraft's hearts (one health pool).
+			case Proto.IN_HEAL -> SkyClient.act(minecraft, dev.skycraft.net.SkyNet.Act.simple(dev.skycraft.net.SkyNet.Act.HEAL, 0, a / 10000.0F, 0.0F));
+			case Proto.IN_SKYRIM_HIT -> {
+				SkyClient.act(minecraft, dev.skycraft.net.SkyNet.Act.simple(dev.skycraft.net.SkyNet.Act.SKYRIM_HIT, code, a / 100.0F, b / 100.0F));
+				SkyClient.skyrimSwingOnBlock(minecraft, code);  // SkyCraft+ : Skyrim weapons break blocks
+			}
 			default -> {
 			}
 		}
+	}
+
+	/** SkyCraft+ : controller inventory snapping. Where Minecraft last put the cursor itself (McState). */
+	public static volatile int jumpSeq, jumpX, jumpY;
+
+	/**
+	 * SkyCraft+ : controller inventory snapping. The cursor jumps to the nearest slot that way
+	 * (dx, dy each -1, 0 or 1; down is +1), the nearer in line the better; off any slot, to the slot
+	 * nearest it. Skyrim's cursor follows (McState::cursorSeq).
+	 */
+	private static void slotJump(Minecraft minecraft, long handle, int dx, int dy) {
+		if (!(minecraft.gui.screen() instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?> screen)) {
+			return;
+		}
+		var pos = (dev.skycraft.client.mixin.ContainerScreenAccessor) screen;
+		double scale = (double) minecraft.getWindow().getScreenWidth() / minecraft.getWindow().getGuiScaledWidth();
+		double gx = cursorX / scale, gy = cursorY / scale;
+		// Slot centres (GUI pixels), and the Skyrim panels' tabs and things beside the inventory.
+		java.util.List<int[]> targets = new java.util.ArrayList<>();
+		for (var slot : screen.getMenu().slots) {
+			if (slot.isActive()) {
+				targets.add(new int[] { pos.skycraft$leftPos() + slot.x + 8, pos.skycraft$topPos() + slot.y + 8 });
+			}
+		}
+		targets.addAll(SkyInventoryPanels.jumpTargets(screen));
+		int[] here = null;
+		for (int[] target : targets) {
+			if (gx >= target[0] - 9 && gx < target[0] + 9 && gy >= target[1] - 9 && gy < target[1] + 9) {
+				here = target;
+			}
+		}
+		int[] best = null;
+		double bestScore = Double.MAX_VALUE;
+		for (int[] target : targets) {
+			if (target == here) {
+				continue;
+			}
+			double cx = target[0] - gx, cy = target[1] - gy;
+			double score;
+			if (here == null) {
+				score = cx * cx + cy * cy;
+			} else {
+				double along = cx * dx + cy * dy;  // how far that way
+				double across = Math.abs(cx * dy - cy * dx);  // how far off the line
+				if (along < 4.0) {
+					continue;
+				}
+				score = along + across * 3.0;
+			}
+			if (score < bestScore) {
+				bestScore = score;
+				best = target;
+			}
+		}
+		if (best == null) {
+			return;
+		}
+		double x = best[0] * scale, y = best[1] * scale;
+		double mx = x - cursorX, my = y - cursorY;
+		cursorX = x;
+		cursorY = y;
+		minecraft.mouseHandler.onMove(handle, x, y, mx, my);
+		jumpX = (int) Math.round(x);
+		jumpY = (int) Math.round(y);
+		jumpSeq++;
 	}
 
 	/** Skyrim hit the player: apply it as Minecraft damage on the integrated server (or the host's). */

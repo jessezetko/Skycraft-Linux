@@ -22,14 +22,56 @@ public final class SkyCraft implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		SkyCombat.init();
+		dev.skycraft.combat.SkyWeaponTools.init();
 		dev.skycraft.net.SkyNet.init();
+		dev.skycraft.net.SkyShortcuts.init(); // SkyCraft+ : Skyrim shortcuts
+		dev.skycraft.net.SkyStorage.init(); // SkyCraft+ : Skyrim items in Minecraft's containers
 		dev.skycraft.world.SkyDig.init();
+		dev.skycraft.world.SkySpawner.init();
+		dev.skycraft.combat.SkyMagic.init();
+		dev.skycraft.world.SkyUnderground.init();
+		dev.skycraft.world.SkyMinecraftWorlds.init();
+		dev.skycraft.world.SkyStructures.init();
+		dev.skycraft.world.SkyInteriors.init();
+		dev.skycraft.world.SkyHold.init();
+		// SkyCraft+ : performance. A slow server tick says so (a hitch flying up to a structure while it
+		// loads: which side it's on, for the next test).
+		final long[] tickStart = { 0L, 0L, 0L };  // start, last logged, lines
+		net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.START_SERVER_TICK.register(server -> tickStart[0] = System.nanoTime());
+		net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(server -> {
+			long now = System.nanoTime(), ms = (now - tickStart[0]) / 1_000_000L;
+			if (ms > 150 && tickStart[2] < 200 && now - tickStart[1] > 1_000_000_000L) {
+				tickStart[1] = now;
+				tickStart[2]++;
+				LOG.info("SkyCraft: slow server tick: {} ms", ms);
+			}
+		});
 		ServerLifecycleEvents.SERVER_STARTED.register(SkyCraft::configureServer);
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
-			giveStarterKit(handler.getPlayer());
-			giveBuilderKit(handler.getPlayer());
+			if (starterKits()) {
+				giveStarterKit(handler.getPlayer());
+				giveBuilderKit(handler.getPlayer());
+			}
 			dressTestGuest(handler.getPlayer());
 		});
+	}
+
+	/**
+	 * SkyCraft+ : no starter kit. Minecraft's ores, trees and mobs are in Skyrim's world now, so a
+	 * new player starts empty-handed as in Minecraft. Setting: starterKit in config/skycraft.properties
+	 * (true gives upstream's kits again).
+	 */
+	private static boolean starterKits() {
+		java.util.Properties p = new java.util.Properties();
+		java.nio.file.Path config = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("skycraft.properties");
+		if (java.nio.file.Files.exists(config)) {
+			try (java.io.Reader in = java.nio.file.Files.newBufferedReader(config)) {
+				p.load(in);
+			} catch (java.io.IOException e) {
+				LOG.warn("SkyCraft: couldn't read {}: {}", config, e.toString());
+			}
+		}
+		return Boolean.parseBoolean(p.getProperty("starterKit", "false").trim());
 	}
 
 	/** The mirror world is a void that only exists to host the player; Skyrim drives time and spawning. */

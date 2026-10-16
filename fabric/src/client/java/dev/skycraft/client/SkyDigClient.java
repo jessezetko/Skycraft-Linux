@@ -8,6 +8,7 @@ import dev.skycraft.world.SkyClip;
 import dev.skycraft.world.SkyCollision;
 import dev.skycraft.world.SkyDig;
 import dev.skycraft.world.SkyRay;
+import dev.skycraft.world.SkyUnderground;
 import it.unimi.dsi.fastutil.longs.Long2IntLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
@@ -51,7 +52,6 @@ public final class SkyDigClient {
 	private static final Long2ObjectOpenHashMap<SkyDig.DugColumn> SEEN = new Long2ObjectOpenHashMap<>();
 	private static final SkyDig.DugColumn NONE = new SkyDig.DugColumn(List.of());
 	private static int seenWorld = Integer.MIN_VALUE;
-	private static int pollTicks;
 
 	/** The Skyrim world the player is in (worldspace or interior cell). */
 	public static int world() {
@@ -63,6 +63,19 @@ public final class SkyDigClient {
 	 * as mining the block it's made of would take. Returns true if it's being mined.
 	 */
 	public static boolean attack(Minecraft minecraft) {
+		return mine(minecraft, null, 1.0F);
+	}
+
+	/**
+	 * SkyCraft+ : Skyrim weapons break blocks. A Skyrim swing landed on Skyrim geometry: as many
+	 * ticks' mining as a swing is worth, with the tool standing in for the weapon.
+	 */
+	public static void weaponHit(Minecraft minecraft, net.minecraft.world.item.ItemStack tool, float worth) {
+		mine(minecraft, tool, worth);
+	}
+
+	/** Mining with the hand's own item (tool null: a tick of the held button) or a Skyrim weapon's stand-in. */
+	private static boolean mine(Minecraft minecraft, net.minecraft.world.item.ItemStack tool, float worth) {
 		if (!(minecraft.hitResult instanceof SkyClip.SkyrimHitResult result) || minecraft.level == null || minecraft.player == null || minecraft.gameMode == null) {
 			return false;
 		}
@@ -84,10 +97,10 @@ public final class SkyDigClient {
 			return false;
 		}
 		// Once a tick (a click and a held button can both land in the same one).
-		if (pos.equals(mining) && miningTick == ticks) {
+		if (tool == null && pos.equals(mining) && miningTick == ticks) {
 			return true;
 		}
-		if (!pos.equals(mining) || ticks - miningTick > 2) {
+		if (!pos.equals(mining) || ticks - miningTick > (tool == null ? 2 : 100)) {  // (swings come a second or so apart)
 			mining = pos;
 			progress = 0.0F;
 			hits = 0;
@@ -95,8 +108,10 @@ public final class SkyDigClient {
 		miningTick = ticks;
 		int material = hit.tri().material == 0 ? DIG_STONE : hit.tri().material;
 		BlockState state = SkyDig.materialState(material);
-		progress += minecraft.player.getAbilities().instabuild ? 1.0F : state.getDestroyProgress(minecraft.player, minecraft.level, pos);
-		if (hits++ % 4 == 0) {
+		progress += minecraft.player.getAbilities().instabuild ? 1.0F
+			: tool == null ? state.getDestroyProgress(minecraft.player, minecraft.level, pos)
+			: dev.skycraft.combat.SkyWeaponTools.progressPerTick(state, minecraft.level, pos, tool) * worth;
+		if (hits++ % 4 == 0 || tool != null) {
 			var sound = state.getSoundType();
 			minecraft.getSoundManager().play(new SimpleSoundInstance(
 				sound.getHitSound(), SoundSource.BLOCKS, (sound.getVolume() + 1.0F) / 8.0F, sound.getPitch() * 0.5F, SoundInstance.createUnseededRandom(), pos
@@ -140,9 +155,7 @@ public final class SkyDigClient {
 		SkyDig.clientWorld = world;
 		SkyDig.clientDug = (x, y, z) -> SkyDig.isDug(level, world, new BlockPos(x, y, z));
 		reveal(level);
-		if (++pollTicks % 5 == 0) {
-			pollDug(minecraft, level);
-		}
+		pollDug(minecraft, level); // SkyCraft+ : performance: every tick (was every 5th), a cave opens without waiting
 		// Skyrim's geometry around dug cells arrived or changed: their walls are drawn again.
 		SkyCollision.takeChangedRegions(key -> {
 			int rx = BlockPos.getX(key), ry = BlockPos.getY(key), rz = BlockPos.getZ(key);
@@ -180,11 +193,13 @@ public final class SkyDigClient {
 				if (queued.contains(n.asLong()) || SkyDig.isDug(level, world, n)) {
 					continue;
 				}
-				if (!SkyCollision.isKnown(n.getX(), n.getY(), n.getZ())) {
+				// SkyCraft+ : the underground. Far under the land it's ground, Skyrim's shape there or not.
+				boolean deep = SkyUnderground.deep(n.getX() + 0.5, n.getY() + 0.5, n.getZ() + 0.5);
+				if (!deep && !SkyCollision.isKnown(n.getX(), n.getY(), n.getZ())) {
 					waiting = true;
 					continue;
 				}
-				int material = SkyDig.classify(n.getX(), n.getY(), n.getZ());
+				int material = deep ? DIG_STONE : SkyDig.classify(n.getX(), n.getY(), n.getZ());
 				if (material <= SkyDig.AIR) {
 					continue;
 				}
@@ -247,11 +262,18 @@ public final class SkyDigClient {
 					continue;
 				}
 				SEEN.put(key, column);
-				for (SkyDig.DugColumn c : new SkyDig.DugColumn[] { column, previous == null ? NONE : previous }) {
+				SkyDig.DugColumn before = previous == null ? NONE : previous;
+				for (SkyDig.DugColumn c : new SkyDig.DugColumn[] { column, before }) {
+					SkyDig.DugColumn other = c == column ? before : column;
 					for (SkyDig.DugSection s : c.sections()) {
+						// SkyCraft+ : performance. Only the sections whose dug cells changed (the whole column
+						// comes again each time any of it changes: a cave opening re-meshed it top to bottom).
+						if (!worldChanged && previous != null && java.util.Arrays.equals(s.bits(), other.bits(s.world(), s.sectionY()))) {
+							continue;
+						}
 						if (worldChanged || s.world() == world) {
 							// Its walls, and the walls next door (a dug cell can open one up).
-							WorldExporter.markDirtyNow(cx, s.sectionY(), cz);
+							WorldExporter.markDirty(cx, s.sectionY(), cz); // (nearest first: WorldExporter)
 							WorldExporter.markDirty(cx - 1, s.sectionY(), cz);
 							WorldExporter.markDirty(cx + 1, s.sectionY(), cz);
 							WorldExporter.markDirty(cx, s.sectionY() - 1, cz);

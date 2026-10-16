@@ -32,10 +32,41 @@ namespace skycraft
 		PendingHurt dot;  // accumulated magic / unattributed damage
 
 		bool  essentialSet = false;
+		// SkyCraft+ : healing potions. Seconds left in which a health gain counts as a heal.
+		float healWindow = 0.0f;
 		bool  healthPrimed = false;
 		float diagTimer = 5.0f;
 		bool  engaged = false;
 		float engagedTimer = 0.0f;
+
+		bool IsHeal(const RE::EffectSetting* a_base)
+		{
+			using Arch = RE::EffectArchetypes::ArchetypeID;
+			return a_base && a_base->data.primaryAV == RE::ActorValue::kHealth && !a_base->IsDetrimental() &&
+			       (a_base->HasArchetype(Arch::kValueModifier) || a_base->HasArchetype(Arch::kPeakValueModifier) || a_base->HasArchetype(Arch::kDualValueModifier));
+		}
+
+		// SkyCraft+ : healing potions. A potion's heal is instant: its effect was gone before the
+		// health it gave was seen, so it was taken for Skyrim's own regeneration and Minecraft's hearts
+		// stayed where they were. A healing effect landing on the player opens a second for it.
+		class HealSink final : public RE::BSTEventSink<RE::TESMagicEffectApplyEvent>
+		{
+		public:
+			static HealSink* Get()
+			{
+				static HealSink sink;
+				return &sink;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESMagicEffectApplyEvent* a_event, RE::BSTEventSource<RE::TESMagicEffectApplyEvent>*) override
+			{
+				auto* player = RE::PlayerCharacter::GetSingleton();
+				if (a_event && player && a_event->target.get() == player && IsHeal(RE::TESForm::LookupByID<RE::EffectSetting>(a_event->magicEffect))) {
+					healWindow = 1.0f;
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
 
 		class HitSink final : public RE::BSTEventSink<RE::TESHitEvent>
 		{
@@ -96,10 +127,39 @@ namespace skycraft
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		// SkyCraft+ : Skyrim can't kill the player while Minecraft decides. Essential didn't stop one
+		// big hit (a Dremora's fireball, 120 at level 1: dead, and the last save loaded): health
+		// damage that would take it under 1 is cut to 1, and what was cut goes to Minecraft with the
+		// rest (BridgePlayerDamage). (ActorValueOwner::ModActorValue, the player's ActorValueOwner vtable.)
+		float cutDamage = 0.0f;
+
+		struct ModActorValueHook
+		{
+			static void thunk(RE::ActorValueOwner* a_this, RE::ACTOR_VALUE_MODIFIER a_modifier, RE::ActorValue a_value, float a_amount)
+			{
+				if (essentialSet && a_value == RE::ActorValue::kHealth && a_modifier == RE::ACTOR_VALUE_MODIFIER::kDamage && a_amount < 0.0f) {
+					const float cur = a_this->GetActorValue(RE::ActorValue::kHealth);
+					if (cur + a_amount < 1.0f) {
+						const float allowed = std::min(0.0f, 1.0f - cur);
+						cutDamage += allowed - a_amount;
+						a_amount = allowed;
+					}
+				}
+				func(a_this, a_modifier, a_value, a_amount);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		void SendHurt(proto::HurtKind a_kind, float a_damage, RE::FormID a_attacker, std::uint32_t a_flags)
 		{
 			if (a_damage <= 0.01f) {
 				return;
+			}
+			// SkyCraft+ : one Skyrim hit takes at most this much of Minecraft's health (5 Skyrim damage is
+			// 1 Minecraft): a Dremora's fireball (120) was 24, dead from full in one hit at level 1.
+			if (const float cap = State().maxHitHealth; cap > 0.0f && a_damage > cap * 5.0f) {
+				logger::info("player hit for {:.1f} Skyrim damage: capped at {:.1f} ({} Minecraft health)", a_damage, cap * 5.0f, cap);
+				a_damage = cap * 5.0f;
 			}
 			Link::Get().PushInput(proto::kInHurt, static_cast<std::uint16_t>(a_kind), static_cast<std::int32_t>(a_damage * 100.0f),
 				static_cast<std::int32_t>(a_attacker), static_cast<std::int32_t>(a_flags));
@@ -122,25 +182,81 @@ namespace skycraft
 			essentialSet = a_on;
 		}
 
+		// SkyCraft+ : a healing effect (spell, potion, ...) is restoring the player's health.
+		bool HealingNow(RE::PlayerCharacter* a_player)
+		{
+			// Through MagicTarget, so it's a real call into the game's vtable: on the player itself the
+			// compiler bound it to an address that's empty in this build (a crash on loading a save).
+			auto* target = a_player->AsMagicTarget();
+			auto* effects = target ? target->GetActiveEffectList() : nullptr;
+			if (!effects) {
+				return false;
+			}
+			for (auto* active : *effects) {
+				auto* base = active && !active->flags.any(RE::ActiveEffect::Flag::kInactive) ? active->GetBaseObject() : nullptr;
+				if (IsHeal(base)) {
+					return true;
+				}
+			}
+			return false;
+		}
+
 		// Minecraft owns the player's health: Skyrim damage is refunded here and sent to Minecraft.
+		// SkyCraft+ : Skyrim's health is held at Minecraft's share (never under half, so one big
+		// hit can't send the player into bleedout) instead of full, so a heal has room to work:
+		// what a healing spell or potion restores goes to Minecraft's hearts. Skyrim's own slow
+		// regeneration doesn't (Minecraft heals by eating).
 		void BridgePlayerDamage(RE::PlayerCharacter* a_player, float a_delta)
 		{
 			auto*       av = a_player->AsActorValueOwner();
 			const float max = a_player->GetActorValueMax(RE::ActorValue::kHealth);
+			const float held = std::clamp(State().mcHealthFrac.load(), 0.5f, 1.0f) * max;
+			// Minecraft's hearts moved (healed, hurt, eaten): Skyrim's health follows quietly. Only
+			// what's left after that is Skyrim's doing; taken as a hit, Minecraft healing above half
+			// sent damage back to Minecraft over and over.
+			static float lastHeld = -1.0f;
+			if (healthPrimed && lastHeld >= 0.0f && std::fabs(held - lastHeld) > 0.001f) {
+				if (held > lastHeld) {
+					av->RestoreActorValue(RE::ActorValue::kHealth, held - lastHeld);
+				} else {
+					av->DamageActorValue(RE::ActorValue::kHealth, lastHeld - held);
+				}
+			}
+			lastHeld = held;
 			const float cur = av->GetActorValue(RE::ActorValue::kHealth);
-			const float deficit = max - cur;
+			// What Skyrim's health is given back (to where it's held), and the damage Minecraft gets: that
+			// and what was cut off a hit that would have killed (ModActorValueHook).
+			const float deficit = held - cur;
+			const float hurt = deficit + std::exchange(cutDamage, 0.0f);
 			lastHit.age += a_delta;
 			lastDamagerAge += a_delta;
+			const bool healing = healWindow > 0.0f;
+			healWindow = std::max(0.0f, healWindow - a_delta);
 			if (!healthPrimed) {
 				// Whatever damage the save had before Minecraft took over isn't a new hit.
 				healthPrimed = true;
 				if (deficit > 0.0f) {
 					av->RestoreActorValue(RE::ActorValue::kHealth, deficit);
+				} else if (deficit < 0.0f) {
+					av->DamageActorValue(RE::ActorValue::kHealth, -deficit);
 				}
 				return;
 			}
+			if (deficit < -0.01f) {
+				const float gained = -deficit;
+				av->DamageActorValue(RE::ActorValue::kHealth, gained);
+				if ((healing || HealingNow(a_player)) && max > 0.0f) {
+					Link::Get().PushInput(proto::kInHeal, 0, static_cast<std::int32_t>(gained / max * 10000.0f));
+					static int logged = 0;
+					if (logged++ < 20) {
+						logger::info("health: a Skyrim heal of {:.1f} goes to Minecraft's hearts ({:.0f}%)", gained, gained / max * 100.0f);
+					}
+				}
+			}
 			if (deficit > 0.01f) {
 				av->RestoreActorValue(RE::ActorValue::kHealth, deficit);
+			}
+			if (hurt > 0.01f) {
 				RE::FormID      attacker = 0;
 				proto::HurtKind kind = proto::kHurtOther;
 				std::uint32_t   flags = 0;
@@ -154,11 +270,11 @@ namespace skycraft
 					kind = proto::kHurtMagic;  // damage over time from someone (spells, poison)
 				}
 				if (kind == proto::kHurtMelee || kind == proto::kHurtProjectile) {
-					SendHurt(kind, deficit, attacker, flags);
+					SendHurt(kind, hurt, attacker, flags);
 				} else {
 					dot.attacker = attacker ? attacker : dot.attacker;
 					dot.kind = kind;
-					dot.damage += deficit;
+					dot.damage += hurt;
 				}
 			}
 			dot.age += a_delta;
@@ -328,7 +444,8 @@ namespace skycraft
 			if (!actor || actor->IsDead()) {
 				return;
 			}
-			const float scale = 5.0f + 0.25f * static_cast<float>(actor->GetLevel());
+			// SkyCraft+ : balancing. Was 5 + 0.25 per level: Minecraft swords hit far harder than Skyrim's.
+			const float scale = State().mcDamageBase + State().mcDamagePerLevel * static_cast<float>(actor->GetLevel());
 			const float damage = a_ev.a * scale;
 			const bool  crit = (a_ev.flags & proto::kHitCritical) != 0;
 			const bool  projectile = (a_ev.flags & proto::kHitProjectile) != 0;
@@ -838,20 +955,113 @@ namespace skycraft
 		{
 			REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_PlayerCharacter[0] };
 			HandleHealthDamageHook::func = vtbl.write_vfunc(0x104, HandleHealthDamageHook::thunk);
+			REL::Relocation<std::uintptr_t> values{ RE::VTABLE_PlayerCharacter[5] };  // its ActorValueOwner (at +0xB8 on 1.7.104)
+			ModActorValueHook::func = values.write_vfunc(0x6, ModActorValueHook::thunk);
 			if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
 				events->AddEventSink<RE::TESHitEvent>(HitSink::Get());
+				events->AddEventSink<RE::TESMagicEffectApplyEvent>(HealSink::Get());  // SkyCraft+
 			}
 			ResolveHitPipeline();
 			logger::info("combat hooks installed");
 		}
 
+		// SkyCraft+ : Minecraft hits on Skyrim objects. Minecraft never sees Skyrim's breakable things
+		// (spider webs and the like), so they couldn't be broken outside Skyrim mode: a Minecraft
+		// attack also damages the nearest one in front of the camera within reach.
+		std::atomic<bool> swingPending{ false };
+
+		void HitSkyrimObject(RE::PlayerCharacter* a_player)
+		{
+			proto::McState mc{};
+			auto*          tes = RE::TES::GetSingleton();
+			if (!tes || !Link::Get().ReadMcState(mc)) {
+				return;
+			}
+			// Minecraft's eye and look, as Skyrim positions (two points along the look).
+			const double yaw = mc.yaw * (kPi / 180.0), pitch = mc.pitch * (kPi / 180.0);
+			const double lx = -std::sin(yaw) * std::cos(pitch), ly = -std::sin(pitch), lz = std::cos(yaw) * std::cos(pitch);
+			const RE::NiPoint3 eye = McToSky(mc.eyeX, mc.eyeY, mc.eyeZ);
+			RE::NiPoint3       dir = McToSky(mc.eyeX + lx, mc.eyeY + ly, mc.eyeZ + lz) - eye;
+			if (dir.Length() < 1e-3f) {
+				return;
+			}
+			dir /= dir.Length();
+			constexpr float kReach = 4.5f * float(proto::kUnitsPerBlock);
+			RE::TESObjectREFR* best = nullptr;
+			float              bestAlong = std::numeric_limits<float>::max();
+			tes->ForEachReferenceInRange(a_player, kReach + 400.0f, [&](RE::TESObjectREFR* a_ref) {
+				if (!a_ref || a_ref == a_player || a_ref->IsDisabled() || a_ref->IsDeleted() || !a_ref->Is3DLoaded() || a_ref->As<RE::Actor>()) {
+					return RE::BSContainer::ForEachResult::kContinue;
+				}
+				auto* base = a_ref->GetBaseObject();
+				auto* destructible = base ? skyrim_cast<RE::BGSDestructibleObjectForm*>(base) : nullptr;
+				auto* root3D = a_ref->Get3D();
+				if (!destructible || !destructible->data || destructible->data->numStages <= 0 || !root3D) {
+					return RE::BSContainer::ForEachResult::kContinue;
+				}
+				const auto& bound = root3D->worldBound;
+				const RE::NiPoint3 to = bound.center - eye;
+				const float        along = to.Dot(dir);
+				const RE::NiPoint3 side = to - dir * along;
+				const float        radius = std::max(bound.radius, 20.0f);
+				if (along < -radius || along - radius > kReach || side.Length() > radius * 0.8f + 15.0f || along >= bestAlong) {
+					return RE::BSContainer::ForEachResult::kContinue;
+				}
+				best = a_ref;
+				bestAlong = along;
+				return RE::BSContainer::ForEachResult::kContinue;
+			});
+			if (!best) {
+				return;
+			}
+			best->DamageObject(25.0f, false);
+			static int logged = 0;
+			if (logged++ < 20) {
+				logger::info("Minecraft hit Skyrim's {:08X} ({}): object damaged", best->GetFormID(), best->GetDisplayFullName());
+			}
+		}
+
+		void MinecraftSwing()
+		{
+			swingPending = true;
+		}
+
+		// SkyCraft+ : the Ender Dragon gives a dragon soul. The soul is added at once (so a save made
+		// in the End keeps it); the message waits until the player is back in Skyrim's world, as
+		// Skyrim's HUD isn't shown while it waits in the empty cell.
+		int soulMessages = 0;
+
+		void GiveDragonSoul(RE::PlayerCharacter* a_player)
+		{
+			if (!State().enderDragonSoul) {
+				return;
+			}
+			a_player->AsActorValueOwner()->ModActorValue(RE::ACTOR_VALUE_MODIFIER::kPermanent, RE::ActorValue::kDragonSouls, 1.0f);
+			++soulMessages;
+			logger::info("the Ender Dragon died: one dragon soul (now {:.0f})", a_player->AsActorValueOwner()->GetActorValue(RE::ActorValue::kDragonSouls));
+		}
+
+		void ShowSoulMessages()
+		{
+			if (soulMessages > 0 && !State().parked && !RE::UI::GetSingleton()->GameIsPaused()) {
+				soulMessages = 0;
+				RE::SendHUDMessage::ShowHUDMessage("Dragon soul absorbed");
+			}
+		}
+
 		void PerFrame(RE::PlayerCharacter* a_player, bool a_puppeting, float a_delta)
 		{
 			auto& link = Link::Get();
+			ShowSoulMessages();  // SkyCraft+
+			// SkyCraft+ : Minecraft hits on Skyrim objects.
+			if (swingPending.exchange(false) && a_puppeting && !State().parked && State().minecraftHitsObjects) {
+				HitSkyrimObject(a_player);
+			}
 			if (!a_puppeting) {
 				if (essentialSet) {
 					SetEssential(a_player, false);
 				}
+				cutDamage = 0.0f;  // not a hit when control comes back
 				healthPrimed = false;
 				engaged = false;
 				// Still drain Minecraft's events so stale hits don't land when control resumes.
@@ -859,6 +1069,16 @@ namespace skycraft
 				while (link.PopEvent(ev)) {
 					if (ev.type == proto::kEvPlayerDied && link.McAlive()) {
 						KillPlayer(a_player, ev);
+					} else if (ev.type == proto::kEvPlayerHurt && link.McAlive() && !a_player->IsDead()) {
+						// SkyCraft+ : Skyrim mode: a Minecraft mob hit the player. One health pool:
+						// the share of Minecraft's health it took, of Skyrim's.
+						const float max = a_player->GetActorValueMax(RE::ActorValue::kHealth);
+						a_player->AsActorValueOwner()->DamageActorValue(RE::ActorValue::kHealth, std::clamp(ev.a, 0.0f, 1.0f) * max);
+						logger::info("Skyrim mode: a Minecraft mob took {:.0f}% of the player's health", ev.a * 100.0f);
+					} else if (ev.type == proto::kEvSkyItem) {
+						SkyInventory::Apply(a_player, ev);  // SkyCraft+
+					} else if (ev.type == proto::kEvDragonSoul) {
+						GiveDragonSoul(a_player);  // SkyCraft+
 					}
 				}
 				pendingExplosions.clear();
@@ -890,6 +1110,12 @@ namespace skycraft
 					break;
 				case proto::kEvArrowStuck:
 					WorldRender::StickArrow(ev.formId, ev.a, ev.b, ev.c, ev.d, std::bit_cast<float>(ev.flags));
+					break;
+				case proto::kEvSkyItem:
+					SkyInventory::Apply(a_player, ev);  // SkyCraft+
+					break;
+				case proto::kEvDragonSoul:
+					GiveDragonSoul(a_player);  // SkyCraft+
 					break;
 				case proto::kEvSkillUse:
 					if (ev.formId >= static_cast<std::uint32_t>(RE::ActorValue::kOneHanded) && ev.formId <= static_cast<std::uint32_t>(RE::ActorValue::kEnchanting)) {
@@ -924,5 +1150,87 @@ namespace skycraft
 		}
 
 		bool PlayerEngaged() { return engaged; }
+
+		// SkyCraft+ : Skyrim combat on Minecraft mobs. Skyrim's melee hits only find Skyrim's own
+		// actors; Minecraft's mobs are just drawn. At each of the player's melee HitFrames (while
+		// Minecraft is in its world: a Skyrim hand in Minecraft mode, or Skyrim mode), the hit goes
+		// to Minecraft too, which strikes the mob(s) in front of the player.
+		class HitFrameSink final : public RE::BSTEventSink<RE::BSAnimationGraphEvent>
+		{
+		public:
+			static HitFrameSink* Get()
+			{
+				static HitFrameSink sink;
+				return &sink;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::BSAnimationGraphEvent* a_event, RE::BSTEventSource<RE::BSAnimationGraphEvent>*) override
+			{
+				auto* player = RE::PlayerCharacter::GetSingleton();
+				if (!a_event || !player || a_event->holder != player || a_event->tag != "HitFrame") {
+					return RE::BSEventNotifyControl::kContinue;
+				}
+				auto& st = State();
+				if (!(st.skyrimDrives || (st.puppeting && (st.rightHandSkyrim || st.leftHandSkyrim)))) {
+					return RE::BSEventNotifyControl::kContinue;
+				}
+				// The first- and third-person graphs both send it.
+				const auto now = GetTickCount64();
+				if (now - lastHit < 120) {
+					return RE::BSEventNotifyControl::kContinue;
+				}
+				lastHit = now;
+				auto*      process = player->GetActorRuntimeData().currentProcess;
+				auto*      attack = process && process->high ? process->high->attackData.get() : nullptr;
+				const bool left = attack && attack->IsLeftAttack();
+				const bool power = attack && attack->data.flags.any(RE::AttackData::AttackFlag::kPowerAttack);
+				const bool bash = attack && attack->data.flags.any(RE::AttackData::AttackFlag::kBashAttack);
+				auto*      form = player->GetEquippedObject(left);
+				auto*      weapon = form && form->GetFormID() != 0x1F4 ? form->As<RE::TESObjectWEAP>() : nullptr;
+				// Minecraft damage about a Minecraft weapon's: an iron sword (7) at low skill ~5.5, a
+				// daedric one (14) at skill 100 ~16. A bash mostly pushes; fists are fists.
+				float damage = 1.0f;
+				if (bash) {
+					damage = 2.0f;
+				} else if (weapon) {
+					const float skill = player->AsActorValueOwner()->GetActorValue(weapon->weaponData.skill.get());
+					damage = float(weapon->GetAttackDamage()) * (1.0f + skill / 200.0f) * 0.75f;
+				}
+				if (power) {
+					damage *= 2.0f;
+				}
+				// SkyCraft+ : balancing. Skyrim's weapons do extra to Minecraft's mobs (bashes stay pushes).
+				if (!bash) {
+					damage *= st.skyrimVsMinecraft;
+				}
+				const float          reach = 3.0f * (weapon ? std::clamp(weapon->weaponData.reach, 0.5f, 2.0f) : 0.8f);
+				const std::uint16_t flags = (power ? proto::kSkyrimHitPower : 0) | (bash ? proto::kSkyrimHitBash : 0) | (left ? proto::kSkyrimHitLeft : 0);
+				Link::Get().PushInput(proto::kInSkyrimHit, flags, static_cast<std::int32_t>(damage * 100.0f), static_cast<std::int32_t>(reach * 100.0f));
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+		private:
+			std::uint64_t lastHit = 0;
+		};
+
+		void WatchPlayerHits(RE::PlayerCharacter* a_player, float a_delta)
+		{
+			// Its animation graphs are rebuilt now and then (loads, race and 3D changes); adding the
+			// same sink again is ignored.
+			static float timer = 0.0f;
+			if (a_player && (timer -= a_delta) <= 0.0f) {
+				timer = 2.0f;
+				// Every graph (first and third person): whichever is animating sends the HitFrame.
+				RE::BSAnimationGraphManagerPtr graphs;
+				a_player->GetAnimationGraphManager(graphs);
+				if (graphs) {
+					for (const auto& graph : graphs->graphs) {
+						if (graph) {
+							graph->GetEventSource<RE::BSAnimationGraphEvent>()->AddEventSink(HitFrameSink::Get());
+						}
+					}
+				}
+			}
+		}
 	}
 }

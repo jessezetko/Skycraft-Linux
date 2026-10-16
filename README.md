@@ -1,3 +1,134 @@
+# SkyCraft+ (unofficial)
+
+**A big add-on to [SkyCraft](https://github.com/chasmlol/SkyCraft) by chasm**, built on its 0.1.2
+release. All credit for SkyCraft itself goes to chasm; this fork adds a lot on top. It isn't an
+official release.
+
+> **Early release, work in progress.** It's playable from start to finish (stronghold, the Ender
+> Dragon, End cities), but it's rough around the edges and has [known bugs](#known-bugs). Back up
+> your Skyrim saves, and expect updates. What changed in each update is on the
+> [Releases](../../releases) page.
+
+**Download:** the latest `SkyCraft-…-plus.zip` from [Releases](../../releases). Same requirements
+as SkyCraft (see [Requirements](#requirements)). Remove the original SkyCraft from your mod manager
+first, install the zip the same way, and start a **new Minecraft world** to get the structures.
+
+## What SkyCraft+ adds
+
+**Switch between Skyrim and Minecraft**
+- **K** swaps between Minecraft mode and full Skyrim mode: Skyrim's movement, body, HUD, weapons,
+  magic and shouts. Your blocks stay, and health carries over.
+- **Tab / I / P** open Skyrim's skills menu, inventory and magic while playing as Minecraft,
+  and **Z** shouts.
+- **Mix and match hands:** equip a Skyrim weapon, spell, shield or torch in one hand and keep a
+  Minecraft item in the other, like Flames in one hand and a diamond sword in the other.
+  Two-handers and bows take both hands.
+- **Choose who wins a hand** (the **Hands** button in Minecraft's pause menu): the Skyrim item (default), the
+  Minecraft item, or whichever you picked last. With the last one, switching hotbar slot takes
+  the hand back for Minecraft and unequips the Skyrim weapon; equipping it again brings it back.
+- In third person, your Minecraft body holds a matching Minecraft item for your Skyrim weapon.
+- **Skyrim weapons break blocks:** swing at a Minecraft block (or Skyrim's ground) and it wears
+  down like it would with a matching Minecraft tool. Skyrim's pickaxe mines stone and ore, the
+  woodcutter's axe and war axes chop wood, and swords and maces work slowly on anything soft.
+  Power attacks count for more. (`skyrimWeaponsBreakBlocks` in `skycraft.properties`.)
+
+**Skyrim's inventory inside Minecraft's**
+- Open Minecraft's inventory and Skyrim's is right beside it: your items on the right, your magic
+  (spells by school, shouts, powers) on the left, in Minecraft-style grids with tabs. Click to
+  equip in either hand, put on, drink, eat or read; tooltips show Skyrim's stats. **Skills** and
+  **Map** buttons open Skyrim's menus.
+- Every item is shown with **Skyrim's own picture of it**, drawn from its real 3D model.
+- Sort by name, power, value, weight or count, scroll with the wheel or the scroll bar, and use
+  it all on a controller (the D-pad jumps into the panels).
+- **Shortcuts:** drag a Skyrim item, spell or shout onto your hotbar or inventory (or shift-click
+  it). Picking it on the hotbar equips it, in the off hand it goes in your left hand, right click
+  drinks or eats, and Q drops the real item in Skyrim. It shows Skyrim's count live.
+- **Skyrim items in Minecraft storage:** put Skyrim items in chests, barrels, ender chests,
+  shulker boxes, bundles, hoppers and droppers. They leave your Skyrim inventory, keep their
+  tempering and charge, and hoppers and sorters move them like any Minecraft item. Take one out
+  and it goes back into your Skyrim (it's how you hand Skyrim gear to a friend, too). Quest items
+  and things you made or enchanted yourself stay in Skyrim. (`skyrimStorage` in
+  `skycraft.properties`.)
+
+**Skyrim combat works on Minecraft mobs**
+- Skyrim melee, spells (Flames, bolts, beams), shouts and arrows hit Minecraft mobs, and fire
+  sets them alight.
+- Skyrim healing spells and potions heal your Minecraft hearts.
+- Opening Skyrim's menus pauses Minecraft too.
+- Balanced: Minecraft weapons hit Skyrim's enemies about half as hard as in SkyCraft, and Skyrim
+  weapons hit Minecraft's mobs harder (`[Combat]` in `SkyCraft.ini`).
+- Minecraft weapons break Skyrim's spider webs and other breakable things.
+
+**A living Minecraft world inside Skyrim**
+- Minecraft follows Skyrim's day and night and its weather.
+- Animals and monsters spawn on Skyrim's ground, and villagers live in Skyrim's towns.
+- Mobs walk Skyrim's terrain properly, and Skyrim's NPCs walk on, step up and path around your
+  blocks.
+
+**The real Minecraft underground**
+- Dig down anywhere and you're in real Minecraft terrain: caves, ores at the right depths,
+  mineshafts, dungeons, trial chambers, ancient cities and the stronghold.
+- Eyes of ender lead you to the stronghold under Skyrim.
+- Caves open only around you (`caveRevealRadius` in `skycraft.properties`, 48 blocks) and what's
+  in front of you loads first; deep underground, Skyrim stops drawing the world above
+  (`bHideWorldDeep` in `SkyCraft.ini`).
+
+**The Nether and the End**
+- Build portals and go; you come back out where you went in, even in Whiterun, a house or a cave.
+- Fight the Ender Dragon, with Skyrim's weapons and magic if you like. Killing it gives you a
+  Skyrim **dragon soul**, like one of Skyrim's own dragons (`bEnderDragonSoul`).
+- Skyrim enemies (Dremora, atronachs, vampires, skeletons, Dwarven machines) turn up in the
+  Nether and among the End cities, and leave their loot when killed.
+
+**Minecraft's structures across Skyrim (beta)**
+- Villages (all five kinds), pillager outposts, the woodland mansion, desert and jungle temples,
+  witch huts, ruined portals, trail ruins, shipwrecks, ocean ruins and the ocean monument
+  stand at fixed spots in Skyrim's open world, each on Minecraft ground of its own, away from
+  roads, buildings and mountains.
+- They're **on Skyrim's map and compass with Skyrim's icons, and you can fast travel to them.**
+- Structures are a **work in progress**: they work well enough to explore and loot, but they're
+  still rough around the edges where they meet Skyrim's land. Igloos are left out for now.
+
+**Full native controller support**
+- Play Minecraft mode on a controller (Xbox layout), laid out like console Minecraft, with
+  Skyrim's activate, menu (items, magic, map, skills) and shout (LB + RB) on the pad too.
+  Inventories and chests jump slot to slot like on console. Clicking the right stick switches
+  modes. See [Controller](#controller).
+
+**And more**
+- **Skyrim's opening** (the cart ride and Helgen) plays all the way through.
+- **G activates what's in front of you** even when Skyrim's crosshair finds nothing
+  (`bActivateInView`), and G picks items up off floors and shelves.
+- **Ride Skyrim's horses as your Minecraft character:** in Skyrim's riding camera you see your
+  Minecraft player in the saddle (`bRideAsMinecraft`).
+- New players start empty-handed, as in Minecraft (`starterKit=true` in `skycraft.properties`
+  gives SkyCraft's starter kit back).
+- A pause-menu **world switcher**: make, delete and switch Minecraft worlds, independent of your
+  Skyrim saves.
+- Each Skyrim interior keeps its own builds, animals and dropped items.
+- Sign text and name tags show in Skyrim.
+- Multiplayer: you see the Minecraft stand-in for each other's Skyrim weapons, and each other
+  inside interiors. Skyrim's own world (NPCs, quests) stays separate for each player.
+- Everything new can be turned off in `SkyCraft.ini` and `skycraft.properties`.
+
+## Known bugs
+
+We know about these and are working on them:
+
+- Lighting a Nether portal can leave fire on the frame. Put out, the portal looks lit except
+  that one spot and doesn't work: break a frame block and light it again.
+- Structures (beta) can sit oddly where they meet Skyrim's land: seams, slopes, bits of Skyrim
+  showing through.
+- Mobs sometimes take odd routes over Skyrim's curved ground.
+- Two players in different interiors at the same time share the host's builds there.
+
+Made with the help of an AI coding assistant (Claude) and play-tested in game. Bug reports and
+ideas are welcome in [Issues](../../issues).
+
+---
+
+The rest of this page is SkyCraft's own README, updated for the additions.
+
 # SkyCraft
 
 ![SkyCraft: a Minecraft player walking through Riverwood with the Minecraft HUD](docs/screenshot.jpg)
@@ -45,6 +176,37 @@ shared memory. Minecraft runs hidden in the background, and Skyrim draws everyth
   gives Skyrim's death camera with your Minecraft body ragdolling.
 - **Skyrim's own animations:** chairs, crafting stations, beds, pull levers, horses and scripted
   scenes hand control to Skyrim until they finish.
+- **Skyrim's menus and Skyrim mode:** Tab, I and P open Skyrim's menu, inventory and magic. **K**
+  switches to Skyrim mode (Skyrim's own movement, body, HUD, weapons, magic and shouts) and back;
+  your blocks stay, and health carries across as a share. Shouts work in Minecraft mode too (Z,
+  or LB + RB on a controller).
+- **Mix and match hands:** equip a Skyrim weapon, spell, shield or torch in one hand (Skyrim's
+  inventory or magic menu) and that hand is Skyrim's: Flames in one hand, a diamond sword in the
+  other. Two-handers and bows take both. In third person your Minecraft body holds a Minecraft
+  stand-in for it.
+- **Skyrim combat on Minecraft mobs:** Skyrim melee, spells (sprays, bolts, beams), shouts and
+  arrows hit Minecraft's mobs; fire sets them alight. Skyrim heals heal Minecraft's hearts, and
+  Skyrim menus pause Minecraft. One Skyrim hit takes at most half your hearts (`fMaxHitHealth`).
+- **A living Minecraft world:** Skyrim's clock and weather, animals and monsters spawning on
+  Skyrim's ground, villagers in Skyrim's towns. Mobs path over Skyrim's terrain, and Skyrim's
+  NPCs stand on, step up and walk around Minecraft's blocks.
+- **The Minecraft underground:** dig down and the real Minecraft underground is under Skyrim:
+  caves, ores at their depths, mineshafts, dungeons, trial chambers, ancient cities and the
+  stronghold (eyes of ender find it), with their monsters.
+- **The Nether and the End:** build a portal and go. Skyrim keeps its player in an empty cell
+  meanwhile and draws Minecraft's worlds; you come back out where you went in. The Ender Dragon
+  can be fought with Skyrim's weapons and magic. Skyrim's Dremora, atronachs, vampires and
+  Dwarven machines turn up in the Nether and among the End cities (their loot drops in a sack).
+- **Minecraft's structures in Skyrim (beta):** villages, pillager outposts, the woodland mansion,
+  temples, witch huts, ruined portals, trail ruins, wrecks, ocean ruins and the ocean
+  monument stand at fixed spots in Skyrim's open world, chosen from your Skyrim.esm (off roads,
+  buildings and mountains, inside the borders). Each is built on Minecraft ground of its own when
+  you first come near, and is marked on Skyrim's map and compass (you can fast travel there).
+- **Several Minecraft worlds:** the pause menu's world switcher creates, deletes and switches
+  Minecraft worlds; none is tied to a Skyrim save.
+- **Interiors and worldspaces:** each Skyrim interior keeps its own builds, and other worldspaces
+  (Solstheim, Blackreach...) have Minecraft dimensions of their own.
+- **Signs and name tags** are drawn.
 - **Multiplayer (Minecraft side only):** friends who also run SkyCraft can join your Minecraft
   world over the internet (see [Playing with friends](#playing-with-friends)).
 
@@ -58,10 +220,9 @@ shared memory. Minecraft runs hidden in the background, and Skyrim draws everyth
 | [SKSE64](https://skse.silverlock.org/) | For your game version |
 | [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444) | The "All in one (Anniversary Edition)" file |
 
-> **Heavily recommended: [Alternate Start - Live Another Life](https://www.nexusmods.com/skyrimspecialedition/mods/272).**
-> Skyrim's opening (the cart ride and Helgen) is heavily scripted and may not work with SkyCraft,
-> so you can get stuck. Alternate Start skips it and lets you choose where your new character
-> begins. Otherwise, play from a save made after Helgen.
+> **Optional: [Alternate Start - Live Another Life](https://www.nexusmods.com/skyrimspecialedition/mods/272).**
+> SkyCraft+ plays Skyrim's opening (the cart ride and Helgen) all the way through. If you'd
+> rather skip it, Alternate Start lets you choose where your new character begins.
 
 **Minecraft**
 
@@ -134,6 +295,9 @@ Minecraft has priority. These keys still go to Skyrim:
 | **G** | Skyrim activate: doors, NPCs (talk), containers, levers, furniture |
 | **Esc** | Skyrim menu (or closes an open Minecraft screen) |
 | **J** / **M** | Skyrim journal / map |
+| **Tab** / **I** / **P** | Skyrim menu (skills, level up) / inventory / magic (`sSkyrimMenuKeys` in `SkyCraft.ini`) |
+| **Z** | Skyrim shout (Skyrim's own Shout key; hold to charge) |
+| **K** | Switch between Minecraft mode and Skyrim mode: Skyrim's own movement, body, HUD, weapons and magic (`sModeToggleKey`) |
 | **H** | Skyrim wait |
 | **F9** | Skyrim quickload (save from the Esc menu) |
 | **~** | Skyrim console |
@@ -141,6 +305,28 @@ Minecraft has priority. These keys still go to Skyrim:
 
 Every other key is Minecraft's: **E** inventory, **F5** camera, **T** chat, **/** commands,
 **Shift** crouch/sneak, and so on.
+
+### Controller
+
+A controller (Xbox layout) plays Minecraft mode too, laid out like console Minecraft
+(`bController` in `SkyCraft.ini`):
+
+| Button | Minecraft mode | In a Minecraft screen (inventory, chest) |
+|---|---|---|
+| Left stick | Move (click: sprint) | Jump slot to slot (menus: cursor) |
+| Right stick | Look (click: switch Minecraft/Skyrim mode) | Free cursor (buttons, tabs, recipe book) |
+| RT / LT | Attack, break / use, place | |
+| A | Jump | Click |
+| B | Sneak | Close |
+| X | Skyrim activate (talk, open, loot) | Right-click |
+| Y | Minecraft inventory | Move a whole stack |
+| LB / RB | Hotbar left / right | Scroll |
+| LB + RB together | Skyrim shout (hold to charge) | |
+| D-pad | Up: Minecraft camera; right: Skyrim menu (items, magic, map, skills); down: Minecraft pause menu; left: drop item | Jump slot to slot |
+| Start / Back | Skyrim journal / wait | |
+
+Movement is on or off (no slow walk yet). In Skyrim mode the controller is Skyrim's as usual.
+`bControllerSlots = 0` in `SkyCraft.ini` turns slot jumping off (both sticks move a free cursor).
 
 ## Known limitations
 
@@ -156,18 +342,18 @@ Every other key is Minecraft's: **E** inventory, **F5** camera, **T** chat, **/*
 
   You need to own Minecraft: Java Edition.
 
-- Skyrim's opening (cart ride and Helgen) may leave you stuck. Use
-  [Alternate Start](https://www.nexusmods.com/skyrimspecialedition/mods/272) or a save made after Helgen.
-- Skyrim's inventory, magic, shouts and perks can't be opened while Minecraft drives the player.
-- Minecraft hits only reach NPCs, not Skyrim objects such as the web around Arvel in Bleak Falls
-  Barrow. There's no in-game switch back to plain Skyrim yet. Closing Minecraft hands control
-  back to Skyrim; Minecraft keeps what it last autosaved, every few minutes. Deal with the object,
-  then restart Skyrim to bring Minecraft back.
-- Sign text isn't drawn yet.
-- All Skyrim interiors share one Minecraft world, so blocks placed in one interior can appear in
-  another at the same coordinates.
+- Skyrim and Minecraft items stay separate (a Skyrim sword isn't a Minecraft one), but Skyrim's
+  items and magic are shown beside Minecraft's inventory (E), as shortcuts on your hotbar, and can
+  be stored in Minecraft's chests. Skyrim's own menus are still on Tab, I and P.
+- Sign text is drawn in Minecraft's plain font: letters outside it show as `?`.
+- Skyrim enemies in the Nether and the End leave a sack with their loot instead of a body (bodies
+  fell through Minecraft's blocks).
+- Skyrim has few big flat places away from its mountains, so few villages fit.
+  `structuresOffMountains=false` in Minecraft's `config\skycraft.properties` allows more, on
+  mountainsides.
 - Multiplayer syncs only the Minecraft world. Each player has their own Skyrim, and guests
-  can't hit their own Skyrim NPCs yet.
+  can't hit their own Skyrim NPCs yet. Guests' Skyrim magic on mobs works; their Skyrim-mode
+  use of blocks is built but untested.
 - Mods that also take over the camera (Improved Camera SE, SmoothCam, True Directional Movement)
   will conflict.
 

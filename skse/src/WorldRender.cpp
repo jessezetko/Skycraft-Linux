@@ -1100,6 +1100,9 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 					case proto::kRenSolids:
 						NpcBlocks::OnSolids(a_data, a_bytes);
 						break;
+					case proto::kRenShapes:
+						NpcBlocks::OnShapes(a_data, a_bytes);
+						break;
 					case proto::kRenDug:
 						Dig::OnDug(a_data, a_bytes);
 						break;
@@ -1783,6 +1786,28 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 			a_fc.sunColor[3] = float(count);
 			a_fc.shadowParams[0] = (!interior && dirLight && a_fc.sunDir[2] > 0.03f) ? 1.0f : 0.0f;
 
+			// SkyCraft+ : the Nether and the End. Skyrim's player waits in an empty cell whose lighting
+			// means nothing there: the dimension's own instead. No sun; the Nether's dim red with its
+			// close red fog, the End's pale violet.
+			if (State().parked) {
+				const bool end = State().mcWorld == proto::kDimEnd;
+				for (auto& a : a_fc.ambient) {
+					Set4(a, end ? 0.75f : 1.0f, end ? 0.7f : 0.55f, end ? 0.9f : 0.45f, 0.0f);
+				}
+				a_fc.sunColor[0] = a_fc.sunColor[1] = a_fc.sunColor[2] = 0.0f;
+				a_fc.shadowParams[0] = 0.0f;
+				Set4(a_fc.grade, 1, 1, 1, 0);
+				if (end) {
+					a_fc.fogNear[3] = 0.0f;
+					Set4(a_fc.fogRange, 0.0f, 0.0f, 1.0f, 0.0f);
+				} else {
+					constexpr float nearD = 20.0f * 70.0f, farD = 96.0f * 70.0f;
+					Set4(a_fc.fogNear, 0.2f, 0.03f, 0.03f, 1.0f);
+					Set4(a_fc.fogFar, 0.2f, 0.03f, 0.03f, 0.0f);
+					Set4(a_fc.fogRange, 1.0f / (farD - nearD), nearD / (farD - nearD), 1.0f, 0.9f);
+				}
+			}
+
 			// What Skyrim gave us, now and then, for tuning.
 			static RE::TESObjectCELL* loggedCell = nullptr;
 			static auto               lastLog = std::chrono::steady_clock::time_point{};
@@ -1861,6 +1886,11 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 					maskUsable ? "used (no double shadows; blocks in Skyrim's shade)" : "not used");
 			}
 			shadowMaskUsable = maskUsable;
+			if (State().parked || State().playerUnderLand) {
+				// SkyCraft+ : the empty cell's depth is only what we cleared it to, and down a mine there's
+				// little or nothing of Skyrim's on screen: keep what Skyrim's depth was.
+				return;
+			}
 			auto sorted = v;
 			std::ranges::sort(sorted);
 			const float median = sorted[8];
@@ -1991,7 +2021,7 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 		void CaptureSunShadows(RE::BSShadowLight* a_sun)
 		{
 			auto* renderer = RE::BSGraphics::Renderer::GetSingleton();
-			if (!device || !renderer || !a_sun || !State().puppeting) {
+			if (!device || !renderer || !a_sun || !(State().puppeting || State().skyrimDrives)) {
 				return;
 			}
 			auto& descs = a_sun->GetRuntimeData().shadowmapDescriptors;
@@ -2605,7 +2635,7 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 			fc.depthParams[0] = frustum.fNear;
 			fc.depthParams[1] = frustum.fFar;
 			fc.depthParams[2] = depthReversed ? 1.0f : 0.0f;
-			fc.depthParams[3] = (a_t.sceneDepth && depthUsable && depthKnown) ? 1.0f : 0.0f;
+			fc.depthParams[3] = (a_t.sceneDepth && ((depthUsable && depthKnown) || (State().parked && a_t.skyrimDepth))) ? 1.0f : 0.0f;  // (parked: cleared before Skyrim drew its enemies)
 			fc.screen[0] = 1.0f / float(a_t.width);
 			fc.screen[1] = 1.0f / float(a_t.height);
 			fc.renderMode[0] = a_t.hdr ? 1.0f : 0.0f;
@@ -2678,6 +2708,35 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 
 			// Arrows, dropped items (solid), block cracks (blended), the block outline (lines).
 			const auto camMc = SkyToMc(cam);
+
+			// SkyCraft+ : performance. Sections off screen aren't drawn (each was drawn up to six times
+			// a frame, wherever it was): its bounding sphere against the four sides of the view.
+			float sidePlanes[4][4];
+			for (int k = 0; k < 4; ++k) {
+				const int   row = k / 2;
+				const float sign = (k % 2) ? -1.0f : 1.0f;
+				float       len = 0.0f;
+				for (int c = 0; c < 4; ++c) {
+					sidePlanes[k][c] = fc.viewProj[3][c] + sign * fc.viewProj[row][c];
+					len += c < 3 ? sidePlanes[k][c] * sidePlanes[k][c] : 0.0f;
+				}
+				len = std::sqrt(len);
+				for (int c = 0; c < 4; ++c) {
+					sidePlanes[k][c] = len > 1e-6f ? sidePlanes[k][c] / len : 0.0f;
+				}
+			}
+			const float sectionRadius = 14.0f * float(proto::kUnitsPerBlock);
+			auto        onScreen = [&](const auto& a_s) {
+                double centre[3];
+                McToSkyD(a_s.sx * 16.0 + 8.0, a_s.sy * 16.0 + 8.0, a_s.sz * 16.0 + 8.0, centre);
+                const float x = float(centre[0] - cam.x), y = float(centre[1] - cam.y), z = float(centre[2] - cam.z);
+                for (const auto& p : sidePlanes) {
+                    if (p[0] * x + p[1] * y + p[2] * z + p[3] < -sectionRadius) {
+                        return false;
+                    }
+                }
+                return true;
+			};
 			dynVerts.clear();
 			static std::vector<Vertex> cracks;
 			cracks.clear();
@@ -2797,7 +2856,7 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 			a_context->OMSetDepthStencilState(reversed ? depthWriteRev : depthWrite, 0);
 			for (auto& [key, s] : sections) {
 				const double dx = s.sx * 16.0 + 8.0 - camMc.x, dy = s.sy * 16.0 + 8.0 - camMc.y, dz = s.sz * 16.0 + 8.0 - camMc.z;
-				if (dx * dx + dy * dy + dz * dz > 320.0 * 320.0 || !s.opaque) {
+				if (dx * dx + dy * dy + dz * dz > 320.0 * 320.0 || !s.opaque || !onScreen(s)) {
 					continue;
 				}
 				double origin[3];
@@ -2824,7 +2883,8 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 				a_context->RSSetState(rasterCullBack);
 			}
 			for (auto& [key, s] : sections) {
-				if (!s.translucent) {
+				const double dx = s.sx * 16.0 + 8.0 - camMc.x, dy = s.sy * 16.0 + 8.0 - camMc.y, dz = s.sz * 16.0 + 8.0 - camMc.z;
+				if (!s.translucent || dx * dx + dy * dy + dz * dz > 320.0 * 320.0 || !onScreen(s)) {
 					continue;
 				}
 				double origin[3];
@@ -2866,7 +2926,7 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 					a_context->OMSetRenderTargets(0, nullptr, copy);
 					for (auto& [key, s] : sections) {
 						const double dx = s.sx * 16.0 + 8.0 - camMc.x, dy = s.sy * 16.0 + 8.0 - camMc.y, dz = s.sz * 16.0 + 8.0 - camMc.z;
-						if (dx * dx + dy * dy + dz * dz > 320.0 * 320.0 || !s.opaque) {
+						if (dx * dx + dy * dy + dz * dz > 320.0 * 320.0 || !s.opaque || !onScreen(s)) {
 							continue;
 						}
 						double origin[3];
@@ -2901,8 +2961,19 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 				Game::NoteFrameStep('D');
 				Game::NoteRenderedCamera(camera->world.translate, camera->world.rotate);
 			}
-			if (!device || !atlasSrv || !inFrameEnabled || !camera || !renderer || !st.puppeting || st.skyrimMenuOpen || !depthKnown || !depthUsable) {
+			if (!device || !atlasSrv || !inFrameEnabled || !camera || !renderer || !(st.puppeting || st.skyrimDrives) || st.skyrimMenuOpen || (!st.parked && !st.playerUnderLand && (!depthKnown || !depthUsable))) {
 				return;
+			}
+			if (!st.parked && st.playerUnderLand) {
+				// SkyCraft+ : the underground. Far under the map (below about -8192 units) Skyrim's depth
+				// holds something near the camera, which hid every block behind it: down a mine nothing
+				// of Skyrim's is in front of the blocks, so its depth starts far.
+				auto& prd = renderer->GetRuntimeData();
+				auto* pctx = reinterpret_cast<ID3D11DeviceContext*>(prd.context);
+				auto* pdsv = reinterpret_cast<ID3D11DepthStencilView*>(renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN].views[0]);
+				if (pctx && pdsv) {
+					pctx->ClearDepthStencilView(pdsv, D3D11_CLEAR_DEPTH, depthReversed ? 0.0f : 1.0f, 0);
+				}
 			}
 			Link::Get().ReadWorldEntities(entities);
 			if (sections.empty() && entities.count == 0 && !entities.hasSelection && avatar.batches.empty() && scene.batches.empty()) {
@@ -3020,10 +3091,82 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 			inFrameDrawn = true;
 		}
 
+		// SkyCraft+ : the lava flicker. In the Nether and the End Skyrim's player waits in an interior
+		// cell, so Skyrim's ambient occlusion runs with its strong interior settings over the blocks
+		// (it sees their depth): a sea of lava or the End's island, flat and seen at a slant, got dark
+		// blotches that crawled as the camera turned. Off while waiting there, back as it was after.
+		void AmbientOcclusionWhileParked(bool a_parked)
+		{
+			static bool saved = false, wasOn = true;
+			auto*       ism = RE::ImageSpaceManager::GetSingleton();
+			auto*       sao = ism ? ism->GetRuntimeData().BSImagespaceShaderISSAOBlurH : nullptr;
+			if (!sao) {
+				return;
+			}
+			const bool off = a_parked && State().noAmbientOcclusionAway;
+			if (off && !saved) {
+				wasOn = sao->enableSAO;
+				sao->enableSAO = false;
+				saved = true;
+				logger::info("Skyrim's ambient occlusion off in Minecraft's world (was {})", wasOn ? "on" : "off");
+			} else if (!off && saved) {
+				sao->enableSAO = wasOn;
+				saved = false;
+				logger::info("Skyrim's ambient occlusion back {}", wasOn ? "on" : "off");
+			}
+		}
+
+		// SkyCraft+ : the Nether and the End. Skyrim's player waits in an empty cell, so nothing of
+		// Skyrim's covers the screen and its picture keeps old frames (smeared by its temporal
+		// anti-aliasing). Once a frame is shown, the next starts from the dimension's fog colour, far
+		// depth and no motion instead (cleared any later, it hid the enemies Skyrim draws there).
+		void ClearParked()
+		{
+			auto& st = State();
+			AmbientOcclusionWhileParked(st.parked);  // SkyCraft+ : the lava flicker
+			auto* renderer = RE::BSGraphics::Renderer::GetSingleton();
+			// (Not waiting for the depth probe: it runs only in Skyrim's world, so after loading a save
+			// made in the Nether straight from the main menu it never had, nothing was cleared, and the
+			// main menu's old frames hid the blocks but for a moment now and then. Unprobed, Skyrim's
+			// own standard depth is cleared to.)
+			if (!st.parked || !renderer) {
+				return;
+			}
+			auto& prd = renderer->GetRuntimeData();
+			auto* pctx = reinterpret_cast<ID3D11DeviceContext*>(prd.context);
+			auto* prtv = reinterpret_cast<ID3D11RenderTargetView*>(prd.renderTargets[RE::RENDER_TARGETS::kMAIN].RTV);
+			auto* pmotion = reinterpret_cast<ID3D11RenderTargetView*>(prd.renderTargets[RE::RENDER_TARGETS::kMOTION_VECTOR].RTV);
+			auto* pdsv = reinterpret_cast<ID3D11DepthStencilView*>(renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN].views[0]);
+			if (!pctx || !prtv || !pdsv) {
+				return;
+			}
+			const bool  end = st.mcWorld == proto::kDimEnd;
+			const float fog[4] = { end ? 0.04f : 0.2f, 0.03f, end ? 0.06f : 0.03f, 1.0f };
+			const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			pctx->ClearRenderTargetView(prtv, fog);
+			if (pmotion) {
+				pctx->ClearRenderTargetView(pmotion, zero);
+			}
+			pctx->ClearDepthStencilView(pdsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, depthReversed ? 0.0f : 1.0f, 0);
+		}
+
 		struct RenderWorldHook
 		{
 			static void thunk(bool a_unk)
 			{
+				Game::BeforeRenderWorld();
+				// SkyCraft+ : the Nether and the End. Skyrim's actors are drawn before this call and its
+				// effects (spells, fire, sparks) during it, and effects don't write depth: blocks drawn
+				// after went over every one of them, and there everything behind them is blocks. So there,
+				// the blocks first (behind the actors already drawn), the effects over them.
+				if (State().parked && State().blocksBeforeEffects) {
+					{
+						Perf::Scope timer(Perf::kInFrame);
+						DrawInFrame();
+					}
+					func(a_unk);
+					return;
+				}
 				func(a_unk);
 				Perf::Scope timer(Perf::kInFrame);
 				DrawInFrame();
@@ -3217,7 +3360,7 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 
 			auto& st = State();
 			auto* camera = RE::Main::WorldRootCamera();
-			if (!camera || !st.puppeting || st.skyrimMenuOpen || !atlasSrv) {
+			if (!camera || !(st.puppeting || st.skyrimDrives) || st.skyrimMenuOpen || !atlasSrv) {
 				return;
 			}
 
@@ -3262,6 +3405,19 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 				t.rtv = rtv;
 				t.dsv = ownDsv;
 				t.sceneDepth = depthSrv;
+				// SkyCraft+ : the underground, the Nether and the End. Far under the map Skyrim may skip
+				// drawing its world: its picture and depth are then old frames (smeared, and hiding our
+				// blocks). Down there nothing of Skyrim's is wanted anyway: start from black, no depth.
+				if (st.playerUnderLand && !st.parked) {  // (parked: ClearParked cleared it before Skyrim drew)
+					const float dark[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+					a_context->ClearRenderTargetView(rtv, dark);
+					t.sceneDepth = nullptr;
+					static bool told = false;
+					if (!told) {
+						told = true;
+						logger::info("underground: Skyrim didn't draw its world this frame; blocks drawn on a cleared frame");
+					}
+				}
 				t.width = bbDesc.Width;
 				t.height = bbDesc.Height;
 				RenderPasses(a_context, t, camera, maskSrv);
@@ -3301,6 +3457,11 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 			if (hookCall(lateSite, REL::ID(106438).address(), "FinishAccumulatingPostResolveDepth's call")) {
 				LatePassProbeHook::func = SKSE::GetTrampoline().write_call<5>(lateSite, LatePassProbeHook::thunk);
 			}
+		}
+
+		void AfterPresent()
+		{
+			ClearParked();
 		}
 
 		void CaptureIfRequested(ID3D11DeviceContext* a_context, IDXGISwapChain* a_swapChain)

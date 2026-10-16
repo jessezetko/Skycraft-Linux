@@ -238,7 +238,7 @@ float4 PSMain(VSOut i) : SV_Target {
 				return;
 			}
 			UploadLatestFrame();
-			if (!haveFrame || st.skyrimMenuOpen) {
+			if (!haveFrame || st.skyrimMenuOpen || (st.skyrimMode && !st.mcScreenOpen)) {
 				return;
 			}
 
@@ -372,11 +372,13 @@ float4 PSMain(VSOut i) : SV_Target {
 			// Present runs even while the game is paused (menus, loading), unlike the player update,
 			// so this is where Skyrim tells Minecraft it is still alive.
 			Link::Get().Heartbeat();
+			Game::ReportPause();
 			Game::CheckRenderedCamera();
 			try {
 				// Minecraft's world things (blocks, arrows, items) go under its hand and HUD.
 				if (Link::Get().Valid() && InitResources(a_swapChain)) {
 					WorldRender::Draw(device, context, a_swapChain);
+					IconRender::Draw(device, context);  // SkyCraft+ : Skyrim's item pictures
 				}
 				DrawOverlay(a_swapChain);
 				if (device) {
@@ -384,7 +386,12 @@ float4 PSMain(VSOut i) : SV_Target {
 				}
 			} catch (...) {
 			}
-			return originalPresent(a_swapChain, a_sync, a_flags);
+			const auto result = originalPresent(a_swapChain, a_sync, a_flags);
+			try {
+				WorldRender::AfterPresent();
+			} catch (...) {
+			}
+			return result;
 		}
 	}
 

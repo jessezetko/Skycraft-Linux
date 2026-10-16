@@ -49,7 +49,7 @@ namespace skycraft
 			const auto to = SkyToMc(a_goal);
 			const int  x0 = int(std::floor(std::min(from.x, to.x) - kMargin)), x1 = int(std::floor(std::max(from.x, to.x) + kMargin));
 			const int  z0 = int(std::floor(std::min(from.z, to.z) - kMargin)), z1 = int(std::floor(std::max(from.z, to.z) + kMargin));
-			const int  y0 = int(std::floor(std::min(from.y, to.y))) - 1, y1 = int(std::floor(std::max(from.y, to.y))) + 3;
+			const double runX = to.x - from.x, runZ = to.z - from.z, run2 = runX * runX + runZ * runZ;
 			if ((x1 - x0) * (z1 - z0) > 160 * 160) {
 				return nullptr;  // a long trip: only the blocks near the start matter much, skip
 			}
@@ -61,9 +61,15 @@ namespace skycraft
 			std::vector<Column> columns;
 			for (int x = x0; x <= x1; ++x) {
 				for (int z = z0; z <= z1; ++z) {
+					// SkyCraft+ : only blocks in the way of the body: from a step above the feet there (along
+					// the way from start to goal) up. Minecraft ground underfoot (round a structure) made
+					// every column of it a pillar to go round, and an NPC standing on it couldn't move.
+					const double along = run2 > 1e-6 ? std::clamp(((x + 0.5 - from.x) * runX + (z + 0.5 - from.z) * runZ) / run2, 0.0, 1.0) : 0.0;
+					const double feet = from.y + (to.y - from.y) * along;
+					const int    y0 = int(std::floor(feet + 0.6)), y1 = int(std::floor(feet + 2.5));
 					int low = INT_MAX, high = INT_MIN;
 					for (int y = y0; y <= y1; ++y) {
-						if (NpcBlocks::SolidAt(x, y, z)) {
+						if (NpcBlocks::BlocksBody(x, y, z)) {
 							low = std::min(low, y);
 							high = std::max(high, y);
 						}
@@ -124,7 +130,7 @@ namespace skycraft
 						a_avoid->nodes.size(), static_cast<int>(n.avoidNodeType.underlying()), n.radius, n.cost);
 				}
 				AvoidArray* ours = nullptr;
-				if (a_actor && !a_actor->IsPlayerRef() && State().puppeting) {
+				if (a_actor && !a_actor->IsPlayerRef() && (State().puppeting || State().skyrimDrives)) {
 					// The goal argument is a BSPathingLocation.
 					RE::NiPoint3 goal;
 					if (ReadPosition(a_goal, goal)) {

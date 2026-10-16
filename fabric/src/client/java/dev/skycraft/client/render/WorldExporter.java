@@ -42,12 +42,14 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.server.level.BlockDestructionProgress;
 import net.minecraft.world.level.CardinalLighting;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -69,6 +71,12 @@ public final class WorldExporter {
 	private static final LongOpenHashSet LIT = new LongOpenHashSet(); // sections Skyrim holds lights for
 	private static final LongOpenHashSet SOLID = new LongOpenHashSet(); // sections Skyrim holds NPC collision for
 	private static final long[] SOLID_BITS = new long[64]; // 4096 blocks: bit x + 16z + 256y
+	// SkyCraft+ : exact block shapes. Sections Skyrim holds collision boxes for (blocks that aren't
+	// full cubes: stairs, slabs, doors, fences...), and this section's boxes (RenShapeBox).
+	private static final LongOpenHashSet SHAPED = new LongOpenHashSet();
+	private static final int SHAPE_STEP = 1 << 14;     // RenShapeBox cell flags (see the protocol)
+	private static final int SHAPE_PASSABLE = 1 << 15;
+	private static ByteBuffer shapeBoxes = ByteBuffer.allocate(64 * 1024).order(ByteOrder.LITTLE_ENDIAN);
 	private static final LongOpenHashSet DUG = new LongOpenHashSet(); // sections Skyrim holds dug cells for
 	private static final ByteBuffer LIGHTS = ByteBuffer.allocate(16 * 16 * 16 * 8).order(ByteOrder.LITTLE_ENDIAN);
 	private static int sentGeneration = Integer.MIN_VALUE;
@@ -96,7 +104,9 @@ public final class WorldExporter {
 	/** A block the player just placed or broke: re-mesh ahead of everything else. */
 	public static void markDirtyNow(int sx, int sy, int sz) {
 		synchronized (DIRTY) {
-			DIRTY.addAndMoveToFirst(SectionPos.asLong(sx, sy, sz));
+			long key = SectionPos.asLong(sx, sy, sz);
+			DIRTY.addAndMoveToFirst(key);
+			URGENT.add(key);
 		}
 	}
 
@@ -105,17 +115,94 @@ public final class WorldExporter {
 		if (level == null || minecraft.player == null || !SkyLink.active()) {
 			return;
 		}
+		// SkyCraft+ : performance. Slow frames say where the time went (a hitch flying up to a
+		// structure while it loads; the next test tells which part).
+		long t0 = System.nanoTime();
+		long gap = lastFrameAt == 0L ? 0L : t0 - lastFrameAt;
+		lastFrameAt = t0;
+		int dirtyBefore;
+		synchronized (DIRTY) {
+			dirtyBefore = DIRTY.size();
+		}
+		boolean resent = false;
 		if (sentGeneration != SkyLink.generation() || sentLevel != level || atlas == null || atlas.stale(minecraft)) {
 			resendEverything(minecraft, level);
+			resent = true;
 		}
+		long t1 = System.nanoTime();
+		int meshedBefore = meshedTotal;
 		meshDirtySections(level);
+		long t2 = System.nanoTime();
+		forgetFar(minecraft);
 		// Animated textures (water, lava, fire, ...): the frame for this game tick.
 		atlas.animate(level.getGameTime(), region -> {
 			ByteBuffer header = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN).putInt(region.x()).putInt(region.y()).putInt(region.w()).putInt(region.h()).flip();
 			return SkyLink.tryWriteRender(Proto.REN_ATLAS_REGION, header, region.pixels());
 		});
+		long t3 = System.nanoTime();
 		exportEntities(minecraft, level, partialTick);
 		AvatarExporter.frame(minecraft, atlas, partialTick);
+		long t4 = System.nanoTime();
+		if ((gap > 150_000_000L || t4 - t0 > 40_000_000L) && slowLogged < 200 && t0 - slowLoggedAt > 1_000_000_000L && gap < 5_000_000_000L) {
+			slowLogged++;
+			slowLoggedAt = t0;
+			SkyCraft.LOG.info("SkyCraft: slow frame: {} ms since the last (ours: {} ms resend{}, {} ms meshing {} sections of {} waiting, {} ms forget/animate, {} ms entities)",
+				gap / 1_000_000L, (t1 - t0) / 1_000_000L, resent ? "" : " (none)", (t2 - t1) / 1_000_000L, meshedTotal - meshedBefore, dirtyBefore,
+				(t3 - t2) / 1_000_000L, (t4 - t3) / 1_000_000L);
+		}
+	}
+
+	private static long lastFrameAt, slowLoggedAt;
+	private static int slowLogged, meshedTotal;
+
+	// SkyCraft+ : the Nether and the End. Skyrim keeps every section it has been sent (the mirror
+	// world's builds are few, and seen from afar); a world of Minecraft's own is terrain everywhere,
+	// so there what's left well beyond the render distance goes.
+	private static int forgetFrames;
+
+	private static void forgetFar(Minecraft minecraft) {
+		if (++forgetFrames % 30 != 0 || !dev.skycraft.client.SkyClient.inMinecraftWorld(minecraft) || minecraft.player == null) {
+			return;
+		}
+		int radius = minecraft.options.getEffectiveRenderDistance() + 3;
+		int pcx = SectionPos.blockToSectionCoord(minecraft.player.getBlockX()), pcz = SectionPos.blockToSectionCoord(minecraft.player.getBlockZ());
+		LongOpenHashSet held = new LongOpenHashSet(SENT);
+		held.addAll(LIT);
+		held.addAll(SOLID);
+		held.addAll(SHAPED);
+		int forgotten = 0;
+		for (long key : held.toLongArray()) {
+			if (Math.abs(SectionPos.x(key) - pcx) > radius || Math.abs(SectionPos.z(key) - pcz) > radius) {
+				if (minecraft.level != null && minecraft.level.getChunkSource().getChunk(SectionPos.x(key), SectionPos.z(key), ChunkStatus.FULL, false) != null) {
+					continue; // still loaded here: it would never be sent again
+				}
+				if (!forget(key)) {
+					break; // ring full: carry on next time
+				}
+				forgotten++;
+			}
+		}
+		if (forgotten > 0 && SkyCraft.LOG.isDebugEnabled()) {
+			SkyCraft.LOG.debug("SkyCraft: {} far sections dropped from Skyrim", forgotten);
+		}
+	}
+
+	/** Empties one section in Skyrim: no mesh, lights, solids or shapes. False if the ring is full. */
+	private static boolean forget(long key) {
+		int sx = SectionPos.x(key), sy = SectionPos.y(key), sz = SectionPos.z(key);
+		Object[][] kinds = { { Proto.REN_SECTION, SENT }, { Proto.REN_LIGHTS, LIT }, { Proto.REN_SOLIDS, SOLID }, { Proto.REN_SHAPES, SHAPED } };
+		for (Object[] kind : kinds) {
+			LongOpenHashSet set = (LongOpenHashSet) kind[1];
+			if (!set.contains(key)) {
+				continue;
+			}
+			ByteBuffer header = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN).putInt(sx).putInt(sy).putInt(sz).putInt(0).flip();
+			if (!SkyLink.tryWriteRender((Integer) kind[0], header, ByteBuffer.allocate(0))) {
+				return false;
+			}
+			set.remove(key);
+		}
+		return true;
 	}
 
 	private static void resendEverything(Minecraft minecraft, ClientLevel level) {
@@ -136,6 +223,7 @@ public final class WorldExporter {
 		SENT.clear();
 		LIT.clear();
 		SOLID.clear();
+		SHAPED.clear();
 		DUG.clear();
 		dev.skycraft.client.SkyDigClient.resendAll();
 		// Everything already loaded needs meshing again; later chunk loads mark themselves dirty.
@@ -162,18 +250,83 @@ public final class WorldExporter {
 		// Real meshing is limited per frame.
 		long deadline = System.nanoTime() + 3_000_000L;
 		int meshed = 0;
-		while (meshed < SECTIONS_PER_FRAME && System.nanoTime() < deadline) {
-			long key;
+		long[] order = nearestFirst();
+		for (int i = 0; i < order.length && meshed < SECTIONS_PER_FRAME && System.nanoTime() < deadline; i++) {
+			long key = order[i];
 			synchronized (DIRTY) {
-				if (DIRTY.isEmpty()) {
-					return;
+				if (!DIRTY.remove(key)) {
+					continue;
 				}
-				key = DIRTY.removeFirstLong();
+				URGENT.remove(key);
 			}
 			if (meshSection(level, key)) {
+				meshedTotal++;
 				meshed++;
 			}
 		}
+	}
+
+	/**
+	 * SkyCraft+ : performance. The dirty sections, most wanted first: what the player just changed,
+	 * then by distance from the camera, those behind it counting as four times as far (a cave or a
+	 * structure opens in front of the player first, rather than in the order it was revealed).
+	 */
+	private static final LongOpenHashSet URGENT = new LongOpenHashSet();
+	private static final int SORT_AT_MOST = 4096;
+
+	private static long[] nearestFirst() {
+		long[] keys;
+		synchronized (DIRTY) {
+			int n = Math.min(DIRTY.size(), SORT_AT_MOST);
+			keys = new long[n];
+			var it = DIRTY.iterator();
+			for (int i = 0; i < n; i++) {
+				keys[i] = it.nextLong();
+			}
+		}
+		Minecraft minecraft = Minecraft.getInstance();
+		if (keys.length <= 1 || minecraft.player == null) {
+			return keys;
+		}
+		var eye = minecraft.player.getEyePosition();
+		var look = minecraft.player.getViewVector(1.0F);
+		long[] packed = new long[keys.length];
+		for (int i = 0; i < keys.length; i++) {
+			long key = keys[i];
+			double dx = SectionPos.x(key) * 16 + 8 - eye.x, dy = SectionPos.y(key) * 16 + 8 - eye.y, dz = SectionPos.z(key) * 16 + 8 - eye.z;
+			double d2 = dx * dx + dy * dy + dz * dz;
+			if (dx * look.x + dy * look.y + dz * look.z < -16.0) {
+				d2 *= 4.0;
+			}
+			boolean urgent;
+			synchronized (DIRTY) {
+				urgent = URGENT.contains(key);
+			}
+			long score = urgent ? 0L : Math.min((long) d2 + 1L, 0x7FFFFFFFL);
+			packed[i] = (score << 32) | i;
+		}
+		java.util.Arrays.sort(packed);
+		long[] order = new long[keys.length];
+		for (int i = 0; i < packed.length; i++) {
+			order[i] = keys[(int) packed[i]];
+		}
+		return order;
+	}
+
+	/** One RenShapeBox: a box of a block's collision shape in sixteenths, rounded outwards. */
+	private static void putShapeBox(int cell, AABB box) {
+		if (shapeBoxes.remaining() < 8) {
+			ByteBuffer bigger = ByteBuffer.allocate(shapeBoxes.capacity() * 2).order(ByteOrder.LITTLE_ENDIAN);
+			bigger.put(shapeBoxes.flip());
+			shapeBoxes = bigger;
+		}
+		shapeBoxes.putShort((short) cell);
+		shapeBoxes.put(sixteenths(Math.floor(box.minX * 16.0))).put(sixteenths(Math.floor(box.minY * 16.0))).put(sixteenths(Math.floor(box.minZ * 16.0)));
+		shapeBoxes.put(sixteenths(Math.ceil(box.maxX * 16.0))).put(sixteenths(Math.ceil(box.maxY * 16.0))).put(sixteenths(Math.ceil(box.maxZ * 16.0)));
+	}
+
+	private static byte sixteenths(double v) {
+		return (byte) Mth.clamp((int) v, 0, 255);
 	}
 
 	private static LevelChunkSection sectionAt(ClientLevel level, LevelChunk chunk, int sy) {
@@ -205,7 +358,20 @@ public final class WorldExporter {
 		int lightCount = 0;
 		java.util.Arrays.fill(SOLID_BITS, 0L);
 		int solidCount = 0;
+		shapeBoxes.clear();
+		int shapeCount = 0;
 		MESH.cardinal = level.cardinalLighting();
+		boolean underground = level.dimension() == net.minecraft.world.level.Level.OVERWORLD && dev.skycraft.world.SkyUnderground.enabled();
+		for (int c = 0; c < 324; c++) {
+			int cx = c % 18 - 1, cz = c / 18 - 1;
+			double land = underground ? dev.skycraft.world.SkyGround.lowestAround(sx * 16 + cx + 0.5, sz * 16 + cz + 0.5) : Double.NaN;
+			if (cx >= 0 && cx < 16 && cz >= 0 && cz < 16) {
+				MESH.skyCut[cx + 16 * cz] = Double.isNaN(land) ? Float.NEGATIVE_INFINITY : (float) (land - 3.0 - sy * 16);
+			}
+			MESH.rockBelow[c] = Double.isNaN(land) ? Float.NEGATIVE_INFINITY : (float) (land - dev.skycraft.world.SkyUnderground.DEEP - sy * 16);
+		}
+		MESH.rockDug = underground ? dev.skycraft.world.SkyDig.clientDug : null;
+		MESH.rockOrigin = SectionPos.of(sx, sy, sz).origin();
 		if (!empty) {
 			BlockPos origin = SectionPos.of(sx, sy, sz).origin();
 			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
@@ -218,10 +384,28 @@ public final class WorldExporter {
 							continue;
 						}
 						// Blocks Skyrim's NPCs can't walk through (anything with a collision shape).
-						if (!state.getCollisionShape(level, pos).isEmpty()) {
+						VoxelShape collision = state.getCollisionShape(level, pos);
+						if (!collision.isEmpty()) {
 							int bit = x + 16 * z + 256 * y;
 							SOLID_BITS[bit >> 6] |= 1L << (bit & 63);
 							solidCount++;
+							// Not a whole block: its real boxes, so characters fit through open doors
+							// and walk up stairs and slabs.
+							if (!Block.isShapeFullBlock(collision)) {
+								// For NPCs: a step to walk onto (whole bottom, open top: slabs, stairs,
+								// carpets), or something mobs walk through (open doors).
+								int cell = bit;
+								if (Block.isFaceFull(collision, Direction.DOWN) && !Block.isFaceFull(collision, Direction.UP)) {
+									cell |= SHAPE_STEP;
+								}
+								if (state.isPathfindable(PathComputationType.LAND)) {
+									cell |= SHAPE_PASSABLE;
+								}
+								for (AABB box : collision.toAabbs()) {
+									putShapeBox(cell, box);
+									shapeCount++;
+								}
+							}
 						}
 						// Light-emitting blocks (torches, lava, glowstone, ...) light Skyrim's world too.
 						int emission = state.getLightEmission();
@@ -240,6 +424,11 @@ public final class WorldExporter {
 						if (state.getRenderShape() == RenderShape.MODEL) {
 							var model = Minecraft.getInstance().getModelManager().getBlockStateModelSet().get(state);
 							blockRenderer.tesselateBlock(MESH, x, y, z, level, pos.immutable(), state, model, state.getSeed(pos));
+						}
+						// SkyCraft+ : the End. End portals and gateways are drawn by a shader of Minecraft's
+						// own that never reaches Skyrim: a glowing obsidian surface stands in for them.
+						if (state.is(Blocks.END_PORTAL) || state.is(Blocks.END_GATEWAY)) {
+							portalFaces(state.is(Blocks.END_GATEWAY), x, y, z);
 						}
 					}
 				}
@@ -286,6 +475,16 @@ public final class WorldExporter {
 					SOLID.add(key);
 				} else {
 					SOLID.remove(key);
+				}
+			}
+			if (shapeCount > 0 || SHAPED.contains(key)) {
+				ByteBuffer shapeHeader = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN).putInt(sx).putInt(sy).putInt(sz).putInt(shapeCount).flip();
+				if (!SkyLink.writeRender(Proto.REN_SHAPES, shapeHeader, shapeBoxes.flip())) {
+					markDirty(sx, sy, sz);
+				} else if (shapeCount > 0) {
+					SHAPED.add(key);
+				} else {
+					SHAPED.remove(key);
 				}
 			}
 			// Cells dug out of Skyrim's world: its geometry there goes.
@@ -377,6 +576,30 @@ public final class WorldExporter {
 	}
 
 	/** Side, top and bottom atlas rects of a full-cube block's model, cached per block state. */
+	/**
+	 * SkyCraft+ : the End. An End portal's surface (12/16 up, seen from both sides) or a gateway's
+	 * whole cube, in obsidian's dark speckled texture at full brightness. Section-relative cell.
+	 */
+	private static void portalFaces(boolean gateway, int x, int y, int z) {
+		float[] rects = cubeFaces(Minecraft.getInstance(), Blocks.OBSIDIAN.defaultBlockState());
+		if (rects == null) {
+			return;
+		}
+		int light = net.minecraft.util.LightCoordsUtil.pack(15, 15);
+		float u0 = rects[4], v0 = rects[5], u1 = rects[6], v1 = rects[7];
+		float[] uv = { u0, v0, u1, v0, u1, v1, u0, v1 };
+		float top = gateway ? 1.0F : 0.75F, bottom = gateway ? 0.0F : 0.75F;
+		// Up and down (the portal's surface is seen from above, a gateway from anywhere).
+		MESH.wall(new float[] { x, y + top, z, x + 1, y + top, z, x + 1, y + top, z + 1, x, y + top, z + 1 }, uv, light, Direction.UP);
+		MESH.wall(new float[] { x, y + bottom, z, x, y + bottom, z + 1, x + 1, y + bottom, z + 1, x + 1, y + bottom, z }, uv, light, Direction.DOWN);
+		if (gateway) {
+			MESH.wall(new float[] { x, y, z, x, y + 1, z, x + 1, y + 1, z, x + 1, y, z }, uv, light, Direction.NORTH);
+			MESH.wall(new float[] { x, y, z + 1, x + 1, y, z + 1, x + 1, y + 1, z + 1, x, y + 1, z + 1 }, uv, light, Direction.SOUTH);
+			MESH.wall(new float[] { x, y, z, x, y, z + 1, x, y + 1, z + 1, x, y + 1, z }, uv, light, Direction.WEST);
+			MESH.wall(new float[] { x + 1, y, z, x + 1, y + 1, z, x + 1, y + 1, z + 1, x + 1, y, z + 1 }, uv, light, Direction.EAST);
+		}
+	}
+
 	private static float[] cubeFaces(Minecraft minecraft, BlockState state) {
 		return CUBE_FACES.computeIfAbsent(state, s -> {
 			var model = minecraft.getModelManager().getBlockStateModelSet().get(s);
@@ -508,6 +731,11 @@ public final class WorldExporter {
 			this.buf.put((byte) (argb >> 16)).put((byte) (argb >> 8)).put((byte) argb).put((byte) (argb >>> 24));
 			int block = (light >> 4) & 0xF;
 			int sky = (light >> 20) & 0xF;
+			// SkyCraft+ : the underground (see skyCut).
+			int col = Mth.clamp((int) x, 0, 15) + 16 * Mth.clamp((int) z, 0, 15);
+			if (y < this.skyCut[col]) {
+				sky = 0;
+			}
 			this.buf.putInt(block | (sky << 8));
 			this.buf.putInt(flags);
 			this.vertices++;
@@ -545,6 +773,9 @@ public final class WorldExporter {
 		// ---- block quads (BlockQuadOutput) ----
 		@Override
 		public void put(float x, float y, float z, BakedQuad quad, QuadInstance instance) {
+			if (this.rockDug != null && this.intoRock((int) x, (int) y, (int) z, quad)) {
+				return;
+			}
 			this.ensure(6 * Proto.REN_VERTEX_BYTES);
 			TextureAtlasSprite sprite = quad.materialInfo().sprite();
 			boolean translucent = quad.materialInfo().layer().translucent();
@@ -567,6 +798,42 @@ public final class WorldExporter {
 		// Skyrim ground's height in the fluid's cell (0..1) and the cell's section-relative y: a
 		// Minecraft fluid level counts from the cell's floor, so on Skyrim ground partway up the cell
 		// the fluid is squeezed into the space above it (thin edges stay visible on the ground).
+		/**
+		 * SkyCraft+ : the underground. Per column of the section being meshed, the height (section
+		 * relative) below which Minecraft's sky light is left out: three blocks under Skyrim's land.
+		 * Breaking a block down a mine opened it onto cells that are still air until the server
+		 * reveals them, and sky light poured in for a moment (a flash); and no sky reaches there.
+		 */
+		final float[] skyCut = new float[256];
+
+		/**
+		 * SkyCraft+ : performance. Deep under Skyrim's land a cell not dug yet is solid rock (it's only
+		 * air here until the underground is revealed into it), so a block's face against it is never
+		 * seen: left out. Without this every revealed cave was a closed shell drawn from outside too.
+		 * Per column of the section and the ring round it (18 x 18), the section-relative height
+		 * under which a cell counts as deep; and the dug cells (null: not in the underground's world).
+		 */
+		final float[] rockBelow = new float[324];
+		dev.skycraft.world.SkyDig.@org.jspecify.annotations.Nullable DugLookup rockDug;
+		BlockPos rockOrigin = BlockPos.ZERO;
+
+		private boolean intoRock(int x, int y, int z, BakedQuad quad) {
+			Direction d = quad.direction();
+			// Only a face lying on the block's side (what a whole block next to it would hide).
+			float side = d.getAxisDirection() == Direction.AxisDirection.POSITIVE ? 1.0F : 0.0F;
+			for (int k = 0; k < 4; k++) {
+				var p = quad.position(k);
+				float along = d.getAxis() == Direction.Axis.X ? p.x() : d.getAxis() == Direction.Axis.Y ? p.y() : p.z();
+				if (Math.abs(along - side) > 1.0E-4F) {
+					return false;
+				}
+			}
+			int nx = x + d.getStepX(), ny = y + d.getStepY(), nz = z + d.getStepZ();
+			if (ny + 0.5F > this.rockBelow[(nx + 1) + 18 * (nz + 1)]) {
+				return false;
+			}
+			return !this.rockDug.isDug(this.rockOrigin.getX() + nx, this.rockOrigin.getY() + ny, this.rockOrigin.getZ() + nz);
+		}
 		float fluidGround;
 		int fluidBaseY;
 

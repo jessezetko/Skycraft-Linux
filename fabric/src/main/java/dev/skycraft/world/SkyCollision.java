@@ -176,12 +176,46 @@ public final class SkyCollision {
 		return below != null && (below & FILL_UPPER) != 0;
 	}
 
+	/**
+	 * SkyCraft+ : mob pathfinding. True if Skyrim geometry is in this cell's upper half (a wall, or
+	 * ground higher than a step): mobs can't stand in the cell, only on top of it.
+	 */
+	public static boolean blocksPath(BlockPos pos) {
+		Integer fill = FILL.isEmpty() ? null : FILL.get(pos.asLong());
+		return fill != null && (fill & FILL_UPPER) != 0;
+	}
+
+	/**
+	 * SkyCraft+ : mob pathfinding. The height (Minecraft y) of the Skyrim ground holding up this
+	 * cell (in its lower half, or the top of the cell below), or NaN if there is none.
+	 */
+	public static double floorUnder(BlockPos pos) {
+		if (FILL.isEmpty()) {
+			return Double.NaN;
+		}
+		Integer here = FILL.get(pos.asLong());
+		if (here != null && (here & FILL_LOWER) != 0 && (here & FILL_UPPER) == 0) {
+			return pos.getY() + groundTop(pos);
+		}
+		BlockPos below = pos.below();
+		Integer under = FILL.get(below.asLong());
+		if (under != null && (under & FILL_UPPER) != 0) {
+			return below.getY() + groundTop(below);
+		}
+		return Double.NaN;
+	}
+
 	public static int blockCount() {
 		return SHAPES.size();
 	}
 
 	public static int regionCount() {
 		return KNOWN_REGIONS.size();
+	}
+
+	/** SkyCraft+ : mobs held where Skyrim's ground is unknown. Skyrim has sent its world this session (even if just cleared). */
+	public static boolean linked() {
+		return epoch != -1;
 	}
 
 	/** Skyrim is describing its world around the player (false in a plain Minecraft world). */
@@ -272,6 +306,7 @@ public final class SkyCollision {
 		TRIS.clear();
 		GHOSTS.clear();
 		TRI_HASH.clear();
+		SkyGround.clear();
 		KNOWN_REGIONS.clear();
 		epoch = newEpoch;
 		SkyCraft.LOG.info("SkyCraft: collision cleared (epoch {})", newEpoch);
@@ -356,6 +391,7 @@ public final class SkyCollision {
 			int flags = s.get(JAVA_INT, e + 36);
 			hash = hash * 31 + flags;
 			SkyTri t = new SkyTri(v, 0, flags);
+			SkyGround.record(t); // SkyCraft+ : where Skyrim's land is, for the underground
 			if (t.degenerate()) {
 				continue;
 			}

@@ -3,6 +3,7 @@
 #include "Game.h"
 
 #include <format>
+#include <fstream>
 
 // Cuts dug blocks out of the meshes Skyrim draws: the ground (land) and diggable objects. A cut
 // mesh is a clone of the original BSTriShape with its own vertex and index buffers (the parts of
@@ -42,6 +43,26 @@ namespace skycraft::Dig
 			float                         up{ 0.0f };  // dug cells reach this far above their top for it
 		};
 		std::unordered_map<RE::BSTriShape*, Cut>  cuts;  // by original
+		// SkyCraft+ : the underground. A mesh's real box (Minecraft space, from its vertices), with
+		// the bound it was taken under. Its bounding sphere reaches as far below as it is wide (a land
+		// block ~40 blocks down), so every cave cell dug under the land changed its dug blocks and
+		// re-cut it (60-85 ms each, several times a second: stutter over a cave).
+		struct Tight
+		{
+			RE::NiBound bound;
+			float       lo[3];
+			float       hi[3];
+			// SkyCraft+ : performance. The blocks its triangles pass through (a block's margin round
+			// each triangle's box); null: too big to list, every dug block in its box counts. A cave
+			// inside a hill's box changed its dug blocks and re-cut it, though no triangle came near.
+			std::shared_ptr<std::unordered_set<std::uint64_t>> cells;
+		};
+
+		std::uint64_t CellKey(int a_x, int a_y, int a_z)
+		{
+			return (std::uint64_t(std::uint32_t(a_x) & 0x1FFFFF) << 42) | (std::uint64_t(std::uint32_t(a_y) & 0x1FFFFF) << 21) | std::uint64_t(std::uint32_t(a_z) & 0x1FFFFF);
+		}
+		std::unordered_map<RE::BSTriShape*, Tight> tight;
 		std::unordered_set<RE::BSTriShape*>        clones;
 		std::vector<RE::BSGraphics::TriShape*>     owned;  // our renderer data, freed once Skyrim lets go
 		struct Grave
@@ -369,6 +390,40 @@ namespace skycraft::Dig
 				mc[i * 3 + 1] = float(p.y);
 				mc[i * 3 + 2] = float(p.z);
 			}
+			if (vertexCount > 0) {
+				Tight box{ a_geom->worldBound, { mc[0], mc[1], mc[2] }, { mc[0], mc[1], mc[2] }, nullptr };
+				for (std::uint32_t i = 1; i < vertexCount; ++i) {
+					for (int k = 0; k < 3; ++k) {
+						box.lo[k] = std::min(box.lo[k], mc[i * 3 + k]);
+						box.hi[k] = std::max(box.hi[k], mc[i * 3 + k]);
+					}
+				}
+				auto cells = std::make_shared<std::unordered_set<std::uint64_t>>();
+				for (std::uint32_t t = 0; t < triCount && cells; ++t) {
+					const std::uint16_t idx[3] = { indices[t * 3], indices[t * 3 + 1], indices[t * 3 + 2] };
+					if (idx[0] >= vertexCount || idx[1] >= vertexCount || idx[2] >= vertexCount) {
+						continue;
+					}
+					int lo[3], hi[3];
+					for (int k = 0; k < 3; ++k) {
+						lo[k] = int(std::floor(std::min({ mc[idx[0] * 3 + k], mc[idx[1] * 3 + k], mc[idx[2] * 3 + k] }))) - 1;
+						hi[k] = int(std::floor(std::max({ mc[idx[0] * 3 + k], mc[idx[1] * 3 + k], mc[idx[2] * 3 + k] }))) + 1;
+					}
+					if (std::int64_t(hi[0] - lo[0] + 1) * (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1) > 4096 || cells->size() > 200000) {
+						cells.reset();  // a huge triangle (or mesh): no list
+						break;
+					}
+					for (int y = lo[1]; y <= hi[1]; ++y) {
+						for (int z = lo[2]; z <= hi[2]; ++z) {
+							for (int x = lo[0]; x <= hi[0]; ++x) {
+								cells->insert(CellKey(x, y, z));
+							}
+						}
+					}
+				}
+				box.cells = std::move(cells);
+				tight[a_geom] = box;
+			}
 
 			std::vector<std::uint8_t>  outVerts(vertices, vertices + std::size_t(vertexCount) * stride);
 			std::vector<std::uint16_t> outIndices;
@@ -563,6 +618,21 @@ namespace skycraft::Dig
 			}
 			float lo[3], hi[3];
 			BoundToMc(a_geom->worldBound, lo, hi);
+			// SkyCraft+ : the underground. Its real box once known (see tight).
+			const std::unordered_set<std::uint64_t>* nearCells = nullptr;
+			if (const auto t = tight.find(a_geom); t != tight.end()) {
+				const auto& b = a_geom->worldBound;
+				if (t->second.bound.center == b.center && t->second.bound.radius == b.radius) {
+					for (int k = 0; k < 3; ++k) {
+						lo[k] = t->second.lo[k] - 0.5f;
+						hi[k] = t->second.hi[k] + 0.5f;
+					}
+					nearCells = t->second.cells.get();
+				} else {
+					tight.erase(t);
+				}
+			}
+			const int reachUp = int(std::ceil(a_up));
 			lo[1] -= a_up;  // reaches down to dug blocks this far below it
 			std::vector<Clip::Cube> cubes;
 			for (int sy = int(std::floor(lo[1])) >> 4; sy <= int(std::floor(hi[1])) >> 4; ++sy) {
@@ -574,7 +644,14 @@ namespace skycraft::Dig
 						}
 						for (const auto& c : bucket->second) {
 							if (hi[0] >= c[0] && lo[0] <= c[0] + 1 && hi[1] >= c[1] && lo[1] <= c[1] + 1 && hi[2] >= c[2] && lo[2] <= c[2] + 1) {
-								cubes.push_back(c);
+								// SkyCraft+ : performance. Only blocks its triangles come near (up to a_up above).
+								bool touches = nearCells == nullptr;
+								for (int dy = 0; dy <= reachUp && !touches; ++dy) {
+									touches = nearCells->contains(CellKey(c[0], c[1] + dy, c[2]));
+								}
+								if (touches) {
+									cubes.push_back(c);
+								}
 							}
 						}
 					}
@@ -677,8 +754,102 @@ namespace skycraft::Dig
 			}
 		}
 
+		// SkyCraft+ : Minecraft's structures. Their areas (SkyStructures writes them to
+		// %LOCALAPPDATA%/SkyCraft/structure-areas.txt, Minecraft blocks): Skyrim's rocks, cliffs and trees
+		// standing in one go whole, rather than cut round its ground (pieces of them stood up in it and
+		// hung over it, and cutting them against thousands of dug blocks stuttered).
+		struct Area
+		{
+			float lo[3], hi[3];
+		};
+		std::vector<Area>               areas;
+		std::filesystem::file_time_type areasTime{};
+
+		void LoadAreas()
+		{
+			wchar_t local[MAX_PATH]{};
+			if (::ExpandEnvironmentStringsW(L"%LOCALAPPDATA%\\SkyCraft\\structure-areas.txt", local, MAX_PATH) == 0) {
+				return;
+			}
+			std::error_code ec;
+			const auto      time = std::filesystem::last_write_time(local, ec);
+			if (ec) {
+				areas.clear();
+				return;
+			}
+			if (time == areasTime) {
+				return;
+			}
+			areasTime = time;
+			areas.clear();
+			std::ifstream in{ std::filesystem::path(local) };
+			std::string   line;
+			while (std::getline(in, line)) {
+				Area area{};
+				if (std::sscanf(line.c_str(), "%f|%f|%f|%f|%f|%f", &area.lo[0], &area.lo[1], &area.lo[2], &area.hi[0], &area.hi[1], &area.hi[2]) == 6) {
+					areas.push_back(area);
+				}
+			}
+			logger::info("dig: {} Minecraft structure areas (Skyrim's rocks and trees in them go whole)", areas.size());
+		}
+
+		// A rock, cliff piece, tree or plant standing in a structure's area (by its middle; a whole
+		// mountain is too big to take: structures keep off those).
+		bool InStructureArea(RE::TESObjectREFR* a_ref, RE::NiAVObject* a_root)
+		{
+			auto* base = a_ref->GetBaseObject();
+			if (areas.empty() || !base || a_root->worldBound.radius > 3000.0f) {
+				return false;
+			}
+			// Only out in Tamriel itself, where the structures are: an interior's or another worldspace's
+			// coordinates can fall in a structure's box, and a dungeon's walls went (for good: it's saved).
+			auto* tes = RE::TES::GetSingleton();
+			auto* world = a_ref->GetWorldspace();
+			if (!tes || tes->interiorCell || !world || world->GetFormID() != 0x3C) {
+				return false;
+			}
+			switch (base->GetFormType()) {
+			case RE::FormType::Static:
+			case RE::FormType::MovableStatic:
+			case RE::FormType::Tree:
+			case RE::FormType::Flora:
+				break;
+			default:
+				return false;
+			}
+			const auto* model = base->As<RE::TESModel>();
+			const char* path = model ? model->GetModel() : nullptr;
+			if (path && (_strnicmp(path, "architecture", 12) == 0 || _strnicmp(path, "landscape\\roads", 15) == 0)) {
+				return false;  // buildings and roads (structures keep off them anyway)
+			}
+			const auto c = SkyToMc(a_root->worldBound.center);
+			for (const auto& area : areas) {
+				if (c.x >= area.lo[0] && c.x <= area.hi[0] + 1 && c.y >= area.lo[1] && c.y <= area.hi[1] + 1 && c.z >= area.lo[2] && c.z <= area.hi[2] + 1) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// SkyCraft+ : the stutter over dug caves. Meshes the last scan found to cut (nearest at the
+		// back) and the dug blocks it found them by; cut a few milliseconds' worth a frame.
+		std::vector<std::pair<RE::NiPointer<RE::BSTriShape>, float>> pending;
+		Buckets                                                      pendingBuckets;
+
+		void CutPending(std::chrono::steady_clock::time_point a_until)
+		{
+			while (!pending.empty() && std::chrono::steady_clock::now() < a_until) {
+				auto [geom, up] = std::move(pending.back());
+				pending.pop_back();
+				if (geom && geom->parent) {
+					Process(geom.get(), pendingBuckets, up);
+				}
+			}
+		}
+
 		void Scan(RE::PlayerCharacter* a_player)
 		{
+			LoadAreas();
 			const auto  here = SkyToMc(a_player->GetPosition());
 			const float lo[3] = { float(here.x) - kScanRadiusBlocks, float(here.y) - kScanRadiusBlocks * 0.5f, float(here.z) - kScanRadiusBlocks };
 			const float hi[3] = { float(here.x) + kScanRadiusBlocks, float(here.y) + kScanRadiusBlocks * 0.5f, float(here.z) + kScanRadiusBlocks };
@@ -720,12 +891,15 @@ namespace skycraft::Dig
 			for (const auto& entry : cuts) {
 				cutMeshes.push_back(entry.second.original);
 			}
+			// SkyCraft+ : the stutter over dug caves. Not cut here but queued (CutPending), after the walk.
+			pending.clear();
 			for (const auto& geom : cutMeshes) {
 				if (geom && seen.insert(geom.get()).second) {
-					Process(geom.get(), buckets, cuts.contains(geom.get()) ? cuts[geom.get()].up : 0.0f);
+					pending.emplace_back(geom, cuts.contains(geom.get()) ? cuts[geom.get()].up : 0.0f);
 				}
 			}
 			if (dug.empty()) {
+				pendingBuckets = std::move(buckets);
 				return;
 			}
 
@@ -793,6 +967,21 @@ namespace skycraft::Dig
 					return RE::BSContainer::ForEachResult::kContinue;
 				}
 				auto* root = a_ref->Get3D();
+				if (root && InStructureArea(a_ref, root)) {
+					static int loggedArea = 0;
+					if (++loggedArea <= 10) {
+						logger::info("dig: removed {} (in a Minecraft structure's area)", a_ref->GetDisplayFullName());
+					}
+					const auto  mid = SkyToMc(root->worldBound.center);
+					const float r = root->worldBound.radius / float(proto::kUnitsPerBlock);
+					for (int dx : { -1, 1 }) {
+						for (int dz : { -1, 1 }) {
+							removed.push_back({ int(std::floor(mid.x + dx * r)), int(std::floor(mid.y)), int(std::floor(mid.z + dz * r)) });
+						}
+					}
+					toDisable.emplace_back(a_ref);
+					return RE::BSContainer::ForEachResult::kContinue;
+				}
 				if (!root || !nearDug(root)) {
 					return RE::BSContainer::ForEachResult::kContinue;  // nothing dug near it (cheap: do this first)
 				}
@@ -835,12 +1024,21 @@ namespace skycraft::Dig
 					}
 				}
 			}
-			// Now cut what was found (nothing is being walked any more).
-			for (auto& [geom, up] : found) {
-				if (geom && geom->parent) {
-					Process(geom.get(), buckets, up);
-				}
+			// Now cut what was found (nothing is being walked any more), a few milliseconds' worth a
+			// frame, nearest first (SkyCraft+ : the stutter over dug caves: flying low over dug ground
+			// loads many meshes at once, and cutting them all in one frame took up to 70 ms).
+			for (auto& entry : found) {
+				pending.push_back(std::move(entry));
 			}
+			auto away = [&](const std::pair<RE::NiPointer<RE::BSTriShape>, float>& a_e) {
+				if (!a_e.first) {
+					return 0.0;
+				}
+				const auto c = SkyToMc(a_e.first->worldBound.center);
+				return (c.x - here.x) * (c.x - here.x) + (c.y - here.y) * (c.y - here.y) + (c.z - here.z) * (c.z - here.z);
+			};
+			std::ranges::sort(pending, [&](const auto& a_a, const auto& a_b) { return away(a_a) > away(a_b); });  // nearest last: taken first
+			pendingBuckets = std::move(buckets);
 			found.clear();
 			static int logged = 0;
 			if (logged < 5 && (landSeen || objectsSeen)) {
@@ -871,6 +1069,7 @@ namespace skycraft::Dig
 				if (cut.original && cut.original->parent && cut.clone) {
 					cut.original->GetFlags().reset(RE::NiAVObject::Flag::kHidden);
 				}
+				tight.erase(it->first);
 				Bury(std::move(cut.clone));
 				it = cuts.erase(it);
 			} else {
@@ -896,6 +1095,10 @@ namespace skycraft::Dig
 			}
 			scanSoon = false;
 			scanTimer = kRescanSeconds;
+		}
+		// SkyCraft+ : the stutter over dug caves.
+		if (!pending.empty()) {
+			CutPending(std::chrono::steady_clock::now() + std::chrono::milliseconds(3));
 		}
 	}
 

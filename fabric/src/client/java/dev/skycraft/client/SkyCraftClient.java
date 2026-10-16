@@ -12,6 +12,13 @@ public final class SkyCraftClient implements ClientModInitializer {
 		dev.skycraft.link.SkyLink.announceRunning();
 		DiscordPresence.start();
 		DestructionToggle.register();
+		WorldSwitcher.register(); // SkyCraft+ : world switcher
+		HandMixToggle.register(); // SkyCraft+ : hand mixing
+		SkyInventoryPanels.register(); // SkyCraft+ : Skyrim's inventory in Minecraft's
+		SkyShortcutsClient.register(); // SkyCraft+ : Skyrim shortcuts
+		ClientTickEvents.END_CLIENT_TICK.register(SkyShortcutsClient::tick);
+		SkyStorageClient.register(); // SkyCraft+ : Skyrim items in Minecraft's containers
+		ClientTickEvents.END_CLIENT_TICK.register(SkyStorageClient::tick);
 		// Multiplayer without editing files: the host opens their world to LAN (O, Open to LAN) and
 		// e4mc gives them a link; friends type /join <link> in chat, and /leave to come back.
 		net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback.EVENT.register((dispatcher, context) -> {
@@ -53,6 +60,16 @@ public final class SkyCraftClient implements ClientModInitializer {
 				dev.skycraft.link.SkyLink.pushEvent(dev.skycraft.link.Proto.EV_PLAYER_DIED, payload.attackerFormId(), 0, 0, 0, 0, 0);
 			}
 		});
+		// SkyCraft+ : a guest in a friend's End: the Ender Dragon died, a dragon soul for this player's Skyrim.
+		net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.registerGlobalReceiver(dev.skycraft.net.SkyNet.DragonSoul.TYPE, (payload, context) -> {
+			if (dev.skycraft.link.SkyLink.active()) {
+				dev.skycraft.link.SkyLink.pushEvent(dev.skycraft.link.Proto.EV_DRAGON_SOUL, 0, 0, 0, 0, 0, 0);
+			}
+		});
+		// SkyCraft+ : held items in multiplayer. What other players' Skyrim hands hold.
+		net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.registerGlobalReceiver(dev.skycraft.net.SkyNet.HandsOf.TYPE,
+			(payload, context) -> SkyHands.otherPlayerHands(payload.entityId(), payload.hands()));
+		net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register((handler, sender, minecraft) -> SkyHands.forgetOtherPlayers());
 		// Skyrim draws the real NPC; its Minecraft stand-in is only a hitbox.
 		EntityRendererRegistry.register(SkyCombat.SKYRIM_ACTOR, NoopRenderer::new);
 		// Players (client-side movement AND the integrated server's re-check of it) use the smooth

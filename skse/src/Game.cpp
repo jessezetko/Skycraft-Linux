@@ -30,11 +30,25 @@ namespace skycraft
 		}();
 		float          holdMismatch = 0.0f;  // seconds Minecraft has been waiting away from Skyrim's player
 		bool           teleportPending = true;
+		// SkyCraft+ : the Nether and the End. After a save loads or Minecraft connects, the save's
+		// place wins: Minecraft's player is brought back from a world of its own (kSkyBringBack).
+		bool           homeCheck = true;
+		float          bringingBack = 0.0f;  // seconds left to wait for Minecraft to come back
+		// SkyCraft+ : a save made in the Nether or the End: Minecraft's world and place then (the SKSE
+		// co-save), and seconds left for Minecraft's player to get back there after the save loads.
+		std::uint32_t  savedWorld = 0;
+		double         savedX = 0.0, savedY = 0.0, savedZ = 0.0;
+		float          sendingAway = 0.0f;
+		bool           savedCheck = false;  // the save just loaded hasn't been checked yet
 		std::uint32_t  worldId = 0;
 		std::uint32_t  epoch = 0;
 		RE::NiPoint3   lastSetPos{};
 		bool           haveLastSet = false;
 		float          hudTimer = 0.0f;
+		bool           hudRightHand = false, hudLeftHand = false;  // SkyCraft+ : the hands the HUD was last set for
+		// SkyCraft+ : the last SkyState the per-frame update wrote, and when (see ReportPause).
+		proto::SkyState            lastSky{};
+		std::atomic<std::uint64_t> lastSkyTick{ 0 };
 		float          savedGravity = -1.0f;  // Skyrim's controller gravity while Minecraft drives
 		// Minecraft's physics ticks, on our clock. Minecraft ticks exactly every tickMs, but stamps a
 		// tick only after that frame's network work and the tick itself (a few ms; more while terrain
@@ -141,6 +155,35 @@ namespace skycraft
 				if (!a_mesh->GetAppCulled()) {
 					a_mesh->SetAppCulled(true);
 					hiddenFirstPerson.emplace_back(a_mesh);
+				}
+				return RE::BSVisit::BSVisitControl::kContinue;
+			});
+		}
+
+		// SkyCraft+ : riding as Minecraft's player. Skyrim's third-person body is hidden on the horse
+		// (Minecraft's sits in the saddle instead). Like the first-person meshes above: only meshes,
+		// never nodes (the seat is read from the pelvis), checked every frame as equipping rebuilds them.
+		std::vector<RE::NiPointer<RE::BSGeometry>> hiddenRider;
+
+		void HideRiderMeshes(RE::PlayerCharacter* a_player, bool a_hide)
+		{
+			if (!a_hide) {
+				for (auto& mesh : hiddenRider) {
+					if (mesh && mesh->GetAppCulled()) {
+						mesh->SetAppCulled(false);
+					}
+				}
+				hiddenRider.clear();
+				return;
+			}
+			auto* root = a_player->Get3D(false);
+			if (!root) {
+				return;
+			}
+			RE::BSVisit::TraverseScenegraphGeometries(root, [&](RE::BSGeometry* a_mesh) {
+				if (!a_mesh->GetAppCulled()) {
+					a_mesh->SetAppCulled(true);
+					hiddenRider.emplace_back(a_mesh);
 				}
 				return RE::BSVisit::BSVisitControl::kContinue;
 			});
@@ -330,7 +373,9 @@ namespace skycraft
 
 		// Hide Skyrim's HUD except the compass, the activation prompt and the enemy health bar
 		// (Minecraft's HUD shows the player's own health, hunger and hotbar).
-		void HideHud(RE::UI* a_ui, bool a_hide)
+		// a_skyrimHands (SkyCraft+ : hand ownership): a hand Skyrim holds needs its magicka, stamina,
+		// charge meters and arrow count; health stays Minecraft's hearts.
+		void HideHud(RE::UI* a_ui, bool a_hide, bool a_skyrimHands)
 		{
 			auto hud = a_ui->GetMenu(RE::HUDMenu::MENU_NAME);
 			if (!hud || !hud->uiMovie) {
@@ -344,8 +389,9 @@ namespace skycraft
 				"_root.HUDMovieBaseInstance.RightChargeMeter",
 				"_root.HUDMovieBaseInstance.ArrowInfoInstance",
 			};
-			const RE::GFxValue visible(!a_hide);
 			for (const auto* path : kElements) {
+				const bool         health = path == kElements[0];
+				const RE::GFxValue visible(!a_hide || (a_skyrimHands && !health));
 				hud->uiMovie->SetVariable((std::string(path) + "._visible").c_str(), visible);
 			}
 		}
@@ -363,15 +409,37 @@ namespace skycraft
 			if (!a_hide && !hidden) {
 				return;
 			}
-			hidden = a_hide;
 			static constexpr const char* kCrosshair[] = {
 				"_root.HUDMovieBaseInstance.CrosshairInstance",
 				"_root.HUDMovieBaseInstance.CrosshairAlert",
 			};
+			// SkyCraft+ : Skyrim's opening. From the escape off the block on, Skyrim's crosshair showed
+			// over Minecraft's: its HUD shows it again between our frames. Its scripts set the
+			// crosshair's visibility and alpha but not its size, so it's shrunk to nothing as well
+			// (and given back the size it had).
+			static double scales[2][2] = { { 100.0, 100.0 }, { 100.0, 100.0 } };
+			static int    reshown = 0;
+			for (int i = 0; i < 2; ++i) {
+				const std::string path(kCrosshair[i]);
+				RE::GFxValue      value;
+				if (a_hide && !hidden) {
+					for (int axis = 0; axis < 2; ++axis) {
+						if (hud->uiMovie->GetVariable(&value, (path + (axis ? "._yscale" : "._xscale")).c_str()) && value.IsNumber() && value.GetNumber() > 0.0) {
+							scales[i][axis] = value.GetNumber();
+						}
+					}
+				} else if (a_hide && hud->uiMovie->GetVariable(&value, (path + "._visible").c_str()) && value.IsBool() && value.GetBool() && reshown++ < 10) {
+					logger::info("Skyrim's HUD showed its crosshair again ({})", path);
+				}
+			}
+			hidden = a_hide;
 			const RE::GFxValue visible(!a_hide), alpha(a_hide ? 0.0 : 100.0);
-			for (const auto* path : kCrosshair) {
-				hud->uiMovie->SetVariable((std::string(path) + "._visible").c_str(), visible);
-				hud->uiMovie->SetVariable((std::string(path) + "._alpha").c_str(), alpha);
+			for (int i = 0; i < 2; ++i) {
+				const std::string path(kCrosshair[i]);
+				hud->uiMovie->SetVariable((path + "._visible").c_str(), visible);
+				hud->uiMovie->SetVariable((path + "._alpha").c_str(), alpha);
+				hud->uiMovie->SetVariable((path + "._xscale").c_str(), RE::GFxValue(a_hide ? 0.0 : scales[i][0]));
+				hud->uiMovie->SetVariable((path + "._yscale").c_str(), RE::GFxValue(a_hide ? 0.0 : scales[i][1]));
 			}
 			hud->uiMovie->SetVariable("_root.HUDMovieBaseInstance.StealthMeterInstance._visible", RE::GFxValue(!a_hide || a_sneaking));
 		}
@@ -383,6 +451,9 @@ namespace skycraft
 		// up again from wherever Skyrim leaves them.
 		const char* SkyrimTakeover(RE::PlayerCharacter* a_player)
 		{
+			if (State().skyrimMode) {
+				return "Skyrim mode";
+			}
 			if (a_player->AsActorState()->GetSitSleepState() != RE::SIT_SLEEP_STATE::kNormal) {
 				return "furniture";
 			}
@@ -391,6 +462,16 @@ namespace skycraft
 			}
 			if (a_player->IsInKillMove()) {
 				return "kill move";
+			}
+			// SkyCraft+ : Skyrim's opening. Its scenes (the cart ride, the walk to the block, the
+			// execution) turn the player's movement off and place them; Minecraft turned the controls
+			// back on (EnsureControlsEnabled) and walked the player out of the scene, which then got
+			// stuck. While Unbound (MQ101) runs with movement off, Skyrim has the player.
+			if (auto* controls = RE::ControlMap::GetSingleton(); controls && !controls->IsMovementControlsEnabled()) {
+				static auto* opening = RE::TESForm::LookupByID<RE::TESQuest>(0x3372B);
+				if (opening && opening->IsRunning()) {
+					return "Skyrim's opening";
+				}
 			}
 			// PlayerCharacter::SetAIDriven (AE 40586) sets bit 3 of this byte (decompiled, 1.7.104).
 			if (REL::Module::IsAE() && (reinterpret_cast<const std::uint8_t*>(a_player)[0xBEA] & 8) != 0) {
@@ -410,6 +491,295 @@ namespace skycraft
 				}
 			}
 			return nullptr;
+		}
+
+		// SkyCraft+ : mode switch. Skyrim just handed the player back: take the look from its camera.
+		bool skyrimLookPending = false;
+
+		// Look direction (MC degrees) from the camera Skyrim rendered last: its world rotation's
+		// columns are forward, up, right (Skyrim heading 0 = +Y north, clockwise).
+		void SeedLookFromCamera(Runtime& a_st, bool a_log)
+		{
+			auto* camera = RE::Main::WorldRootCamera();
+			if (!camera) {
+				return;
+			}
+			const auto& r = camera->world.rotate;
+			const float fx = r.entry[0][0], fy = r.entry[1][0], fz = r.entry[2][0];
+			const float len = std::sqrt(fx * fx + fy * fy + fz * fz);
+			if (len < 0.5f) {
+				return;
+			}
+			const float yaw = HeadingToMcYaw(std::atan2(fx, fy));
+			const float pitch = std::clamp(-std::asin(std::clamp(fz / len, -1.0f, 1.0f)) * kRadToDeg, -90.0f, 90.0f);
+			if (a_log) {
+				logger::info("look: body faces MC yaw {:.0f}, Skyrim's camera {:.0f} / pitch {:.0f}; using the camera", a_st.yaw, yaw, pitch);
+			}
+			a_st.yaw = std::fmod(yaw + 360.0f, 360.0f);
+			a_st.pitch = pitch;
+		}
+
+		// SkyCraft+ : hand ownership. Which hands hold something equipped in Skyrim: a weapon, spell
+		// or torch in the hand, a shield on the left arm; two-handed weapons, bows and crossbows take
+		// both hands. Bare fists are nothing.
+		void SkyrimHands(RE::PlayerCharacter* a_player, bool& a_right, bool& a_left)
+		{
+			constexpr RE::FormID kUnarmed = 0x1F4;
+			auto*                right = a_player->GetEquippedObject(false);
+			auto*                left = a_player->GetEquippedObject(true);
+			a_right = right && right->GetFormID() != kUnarmed;
+			a_left = (left && left->GetFormID() != kUnarmed) || a_player->GetWornArmor(RE::BGSBipedObjectForm::BipedObjectSlot::kShield);
+			if (auto* weapon = right ? right->As<RE::TESObjectWEAP>() : nullptr;
+				weapon && (weapon->IsTwoHandedSword() || weapon->IsTwoHandedAxe() || weapon->IsBow() || weapon->IsCrossbow())) {
+				a_left = true;
+			}
+		}
+
+		// SkyCraft+ : hand mixing. The last spell the player equipped (the same one again changes
+		// nothing in the hand to watch for).
+		struct SpellEquipSink : RE::BSTEventSink<RE::TESEquipEvent>
+		{
+			static SpellEquipSink* Get()
+			{
+				static SpellEquipSink sink;
+				return &sink;
+			}
+			std::atomic<RE::FormID> spell{ 0 };
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent* a_event, RE::BSTEventSource<RE::TESEquipEvent>*) override
+			{
+				if (a_event && a_event->equipped && a_event->actor && a_event->actor->IsPlayerRef()) {
+					if (auto* form = RE::TESForm::LookupByID(a_event->baseObject); form && form->Is(RE::FormType::Spell)) {
+						spell = a_event->baseObject;
+					}
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+
+		// SkyCraft+ : hand mixing. Takes a weapon, shield or torch out of a hand (a spell stays: it's
+		// only no longer that hand's).
+		void UnequipFromHand(RE::PlayerCharacter* a_player, RE::TESForm* a_held, bool a_left)
+		{
+			auto* object = a_held ? a_held->As<RE::TESBoundObject>() : nullptr;
+			if (!object || a_held->Is(RE::FormType::Spell) || a_held->Is(RE::FormType::Scroll)) {
+				return;
+			}
+			const RE::BGSEquipSlot* slot = nullptr;
+			if (a_held->Is(RE::FormType::Weapon)) {
+				if (auto* defaults = RE::BGSDefaultObjectManager::GetSingleton()) {
+#pragma push_macro("GetObject")
+#undef GetObject  // (Windows' GetObjectA)
+					slot = defaults->GetObject<RE::BGSEquipSlot>(a_left ? RE::DEFAULT_OBJECTS::kLeftHandEquip : RE::DEFAULT_OBJECTS::kRightHandEquip);
+#pragma pop_macro("GetObject")
+				}
+			}
+			RE::ActorEquipManager::GetSingleton()->UnequipObject(a_player, object, nullptr, 1, slot);
+			logger::info("hands: Minecraft took the {} hand: {} unequipped", a_left ? "left" : "right", a_held->GetName());
+		}
+
+		// SkyCraft+ : hand mixing (Minecraft pause menu's "Hands" button). A hand holding both a Skyrim
+		// item and a Minecraft one goes to Minecraft's (1) or to the last picked (2); a_right and a_left
+		// come in as SkyrimHands left them.
+		void MixHands(RE::PlayerCharacter* a_player, bool& a_right, bool& a_left)
+		{
+			const int mode = static_cast<int>((mc.hands >> 24) & 3);
+			if (mode == 0) {
+				return;
+			}
+			constexpr RE::FormID kUnarmed = 0x1F4;
+			auto*                rightHeld = a_player->GetEquippedObject(false);
+			auto*                leftHeld = a_player->GetEquippedObject(true);
+			RE::TESForm*         right = rightHeld && rightHeld->GetFormID() != kUnarmed ? rightHeld : nullptr;
+			RE::TESForm*         left = leftHeld && leftHeld->GetFormID() != kUnarmed ? leftHeld : a_player->GetWornArmor(RE::BGSBipedObjectForm::BipedObjectSlot::kShield);
+			auto*                weapon = right ? right->As<RE::TESObjectWEAP>() : nullptr;
+			const bool           bothHands = weapon && (weapon->IsTwoHandedSword() || weapon->IsTwoHandedAxe() || weapon->IsBow() || weapon->IsCrossbow());
+			if (mode == 1) {
+				a_right = a_right && (mc.hands & 1) == 0;
+				a_left = bothHands ? a_right : a_left && (mc.hands & 2) == 0;
+				return;
+			}
+			static bool          started = false;
+			static std::uint64_t lastFrame = 0;
+			static std::uint8_t  rightSeen = 0, leftSeen = 0;
+			static RE::TESForm*  rightWas = nullptr;
+			static RE::TESForm*  leftWas = nullptr;
+			static bool          rightTaken = false, leftTaken = false;
+			static bool          watching = false;
+			if (!watching) {
+				if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
+					events->AddEventSink<RE::TESEquipEvent>(SpellEquipSink::Get());
+					watching = true;
+				}
+			}
+			const auto rightSeq = static_cast<std::uint8_t>(mc.hands >> 8), leftSeq = static_cast<std::uint8_t>(mc.hands >> 16);
+			if (!started || mc.frameCounter < lastFrame) {  // (Minecraft started again: its counts did too)
+				started = true;
+				rightSeen = rightSeq;
+				leftSeen = leftSeq;
+				rightWas = right;
+				leftWas = left;
+				SpellEquipSink::Get()->spell = 0;
+			}
+			lastFrame = mc.frameCounter;
+			// Equipped in Skyrim: that hand is Skyrim's.
+			if (right != rightWas) {
+				rightTaken = rightTaken && !right;
+				rightWas = right;
+			}
+			if (left != leftWas) {
+				leftTaken = leftTaken && !left;
+				leftWas = left;
+			}
+			if (const auto spell = SpellEquipSink::Get()->spell.exchange(0); spell != 0) {
+				rightTaken = rightTaken && !(right && right->GetFormID() == spell);
+				leftTaken = leftTaken && !(left && left->GetFormID() == spell);
+			}
+			// Switched in Minecraft (hotbar slot, off-hand swap): Minecraft's, and the Skyrim item there
+			// is unequipped, so equipping it again brings it back.
+			if (rightSeq != rightSeen) {
+				rightSeen = rightSeq;
+				if (right) {
+					rightTaken = true;
+					UnequipFromHand(a_player, right, false);
+				}
+			}
+			if (leftSeq != leftSeen) {
+				leftSeen = leftSeq;
+				if (bothHands) {
+					rightTaken = true;
+					UnequipFromHand(a_player, right, false);
+				} else if (left) {
+					leftTaken = true;
+					UnequipFromHand(a_player, left, true);
+				}
+			}
+			a_right = a_right && !rightTaken;
+			a_left = bothHands ? a_right : a_left && !leftTaken;
+		}
+
+		// SkyCraft+ : Skyrim weapons break blocks. The weapon's name or model path holds one of these
+		// (any case).
+		bool IsTool(RE::TESObjectWEAP* a_weapon, std::string_view a_word, std::string_view a_other)
+		{
+			auto has = [&](const char* a_text) {
+				if (!a_text) {
+					return false;
+				}
+				std::string text(a_text);
+				std::ranges::transform(text, text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+				return text.find(a_word) != std::string::npos || text.find(a_other) != std::string::npos;
+			};
+			return has(a_weapon->GetName()) || has(a_weapon->GetModel());
+		}
+
+		// SkyCraft+ : what a Skyrim-held hand holds, for the Minecraft body's stand-in in third person.
+		std::uint8_t HandKind(RE::PlayerCharacter* a_player, bool a_left)
+		{
+			auto* held = a_player->GetEquippedObject(a_left);
+			if (!held || held->GetFormID() == 0x1F4) {  // Unarmed
+				return a_left && a_player->GetWornArmor(RE::BGSBipedObjectForm::BipedObjectSlot::kShield) ? proto::kHandShield : proto::kHandNone;
+			}
+			if (held->Is(RE::FormType::Spell) || held->Is(RE::FormType::Scroll)) {
+				return proto::kHandSpell;
+			}
+			if (held->Is(RE::FormType::Light)) {
+				return proto::kHandTorch;
+			}
+			auto* weapon = held->As<RE::TESObjectWEAP>();
+			if (!weapon) {
+				return proto::kHandNone;
+			}
+			using T = RE::WEAPON_TYPE;
+			switch (weapon->GetWeaponType()) {
+			case T::kOneHandSword:
+				return proto::kHandSword;
+			case T::kOneHandDagger:
+				return proto::kHandDagger;
+			case T::kOneHandAxe:
+				// SkyCraft+ : Skyrim weapons break blocks. The pickaxes and the woodcutter's axe are war
+				// axes to Skyrim; known by their name or model.
+				if (IsTool(weapon, "pickaxe", "pick axe")) {
+					return proto::kHandPickaxe;
+				}
+				if (IsTool(weapon, "woodcutter", "woodaxe")) {
+					return proto::kHandWoodAxe;
+				}
+				return proto::kHandWarAxe;
+			case T::kOneHandMace:
+				return proto::kHandMace;
+			case T::kTwoHandSword:
+				return proto::kHandGreatsword;
+			case T::kTwoHandAxe:
+				return weapon->HasKeywordString("WeapTypeWarhammer") ? proto::kHandWarhammer : proto::kHandBattleaxe;
+			case T::kBow:
+				return proto::kHandBow;
+			case T::kCrossbow:
+				return proto::kHandCrossbow;
+			case T::kStaff:
+				return proto::kHandStaff;
+			default:
+				return proto::kHandNone;
+			}
+		}
+
+		// SkyCraft+ : living world. Where the player is and the weather, for Minecraft's spawning:
+		// interiors; settlements (the location or one it's in is a city, town, settlement, home,
+		// inn, castle...: no monsters); dungeons (caves, crypts, ruins: monsters at any hour); rain
+		// or snow.
+		std::uint32_t PlaceFlags(RE::PlayerCharacter* a_player, RE::TESObjectCELL* a_cell)
+		{
+			static constexpr std::string_view kSettlement[] = { "LocTypeCity", "LocTypeTown", "LocTypeSettlement", "LocTypeHabitation",
+				"LocTypeDwelling", "LocTypeInn", "LocTypeHouse", "LocTypePlayerHouse", "LocTypeCastle", "LocTypeJail", "LocTypeStore",
+				"LocTypeTemple", "LocTypeFarm" };
+			std::uint32_t flags = a_cell && a_cell->IsInteriorCell() ? proto::kPlaceInterior : 0u;
+			if (!(flags & proto::kPlaceInterior)) {
+				// Tamriel itself (0x3C) or a worldspace inside it (Whiterun, Solitude...: same coordinates).
+				constexpr RE::FormID kTamriel = 0x3C;
+				auto*                world = a_player->GetWorldspace();
+				for (int depth = 0; world && depth < 8; world = world->parentWorld, ++depth) {
+					if (world->GetFormID() == kTamriel) {
+						flags |= proto::kPlaceTamriel;
+						break;
+					}
+				}
+			}
+			auto*         location = a_player->GetCurrentLocation();
+			if (location && location->HasKeywordString("LocTypeDungeon")) {
+				flags |= proto::kPlaceDungeon;
+			}
+			for (int depth = 0; location && depth < 8; location = location->parentLoc, ++depth) {
+				if (std::ranges::any_of(kSettlement, [&](std::string_view a_keyword) { return location->HasKeywordString(a_keyword); })) {
+					flags |= proto::kPlaceSettlement;
+				}
+				if (location->HasKeywordString("LocTypeCity") || location->HasKeywordString("LocTypeTown")) {
+					flags |= proto::kPlaceTown;
+					break;
+				}
+			}
+			if (auto* sky = RE::Sky::GetSingleton(); sky && sky->currentWeather && !(flags & proto::kPlaceInterior)) {
+				if (sky->currentWeather->data.flags.any(RE::TESWeather::WeatherDataFlag::kRainy)) {
+					flags |= proto::kPlaceRain;
+				}
+				if (sky->currentWeather->data.flags.any(RE::TESWeather::WeatherDataFlag::kSnow)) {
+					flags |= proto::kPlaceSnow;
+				}
+			}
+			return flags;
+		}
+
+		// SkyCraft+ : mode switch. Sets the Skyrim player's health to this share of its maximum.
+		void SetHealthFraction(RE::PlayerCharacter* a_player, float a_fraction)
+		{
+			auto*       av = a_player->AsActorValueOwner();
+			const float max = a_player->GetActorValueMax(RE::ActorValue::kHealth);
+			const float cur = av->GetActorValue(RE::ActorValue::kHealth);
+			const float target = std::max(1.0f, std::clamp(a_fraction, 0.0f, 1.0f) * max);
+			if (target < cur) {
+				av->DamageActorValue(RE::ActorValue::kHealth, cur - target);
+			} else if (target > cur) {
+				av->RestoreActorValue(RE::ActorValue::kHealth, target - cur);
+			}
+			logger::info("health: Skyrim takes Minecraft's {:.0f}% ({:.0f} -> {:.0f})", a_fraction * 100.0f, cur, target);
 		}
 
 		// Tells the player, in Skyrim's corner notifications, what Minecraft is up to while it isn't
@@ -513,6 +883,226 @@ namespace skycraft
 			}
 		}
 
+		// SkyCraft+ : the Nether and the End. Back in the open world, Skyrim's player is held where it came
+		// out until Minecraft drives it again: the ground there isn't loaded yet, and it would fall
+		// through (and die of Skyrim's fall damage) meanwhile.
+		RE::NiPoint3 returnPin;
+		float        returnPinTime = 0.0f;
+		// SkyCraft+ : the underground. Seconds left of counting as under Skyrim's land after Minecraft last
+		// said so (it can lose track for a moment, moving fast through a big cave).
+		float underLandRecently = 0.0f;
+
+		// SkyCraft+ : the Nether and the End. Skyrim has nothing for a world of Minecraft's own, so its
+		// player waits in an empty cell (SkyCraft.ini iWaitingCell) meanwhile, following Minecraft's
+		// there, and only Minecraft is drawn. When Minecraft's player comes out of a portal into the
+		// open world again, Skyrim's goes there. Returns true while parked in the waiting cell.
+		bool MinecraftWorlds(RE::PlayerCharacter* a_player, RE::TESObjectCELL* a_cell, bool a_loading, bool a_mcInWorld, float a_delta)
+		{
+			auto&        st = State();
+			static float retry = 0.0f;  // seconds before a move is tried again
+			static bool  toldStuck = false;
+			auto*        waiting = st.minecraftWorldsOption ? RE::TESForm::LookupByID<RE::TESObjectCELL>(st.waitingCellId) : nullptr;
+			const bool   parked = waiting && a_cell == waiting;
+			const auto   world = mc.dimension;
+			// Minecraft says it's back in the open world a moment before its new position arrives (the
+			// first ones are still the Nether's or the End's): wait until it has stood still a second.
+			static double settleX = 0.0, settleY = 0.0, settleZ = 0.0;
+			static float  settled = -1.0f;
+			// Where it last was in the Nether or the End: standing still in a portal, that position was
+			// still reported while the open world loaded, and taken for where it came out (Skyrim's
+			// player went to the Nether's coordinates, in the air). It has to have moved from there.
+			static double awayX = 0.0, awayZ = 0.0;
+			// SkyCraft+ : back into the same place. Where Skyrim's player was when it went to wait: a
+			// walled city's worldspace (Whiterun...), another worldspace, or an interior.
+			static RE::FormID   leftWorld = 0, leftCell = 0;
+			static RE::NiPoint3 leftPos;
+			static float  sinceBack = 0.0f;
+			if (world >= proto::kDimNether) {
+				awayX = mc.x, awayZ = mc.z;
+				sinceBack = 0.0f;
+			}
+			if (!parked || world > proto::kDimWorldspaces) {
+				settled = -1.0f;
+			}
+			retry -= a_delta;
+			if (!waiting || a_loading || !a_mcInWorld || a_player->IsDead() || retry > 0.0f) {
+				return parked;
+			}
+			// A save in the open world loaded (or Minecraft connected) with Minecraft's player still in the
+			// Nether or the End: the save wins. Parking Skyrim's player then pulled it out of the place
+			// just loaded (and smeared the picture): Minecraft's comes back to it instead.
+			const bool home = std::exchange(homeCheck, false);
+			if (home && !parked && world >= proto::kDimNether) {
+				logger::info("Minecraft's player is in {} but this save is in Skyrim's world: bringing it back", world == proto::kDimNether ? "the Nether" : "the End");
+				bringingBack = 20.0f;
+				teleportPending = true;
+			}
+			// A save made in the Nether or the End loaded with Minecraft's player out in the open world (or
+			// elsewhere in that world): it goes back to where the save was made. (Taken for its coming out of
+			// a portal, Skyrim's player went to Minecraft's place in the open world, nothing loaded round it.)
+			const char* savedName = savedWorld == proto::kDimNether ? "the Nether" : "the End";
+			const bool fromSave = home && std::exchange(savedCheck, false);  // (not again when Minecraft reconnects later)
+			if (fromSave && parked && savedWorld >= proto::kDimNether) {
+				const double dx = mc.x - savedX, dz = mc.z - savedZ;
+				if (world != savedWorld || dx * dx + dz * dz > 16.0 * 16.0) {
+					logger::info("this save was made in {}: Minecraft's player goes back there ({:.0f}, {:.0f}, {:.0f})", savedName, savedX, savedY, savedZ);
+					sendingAway = 20.0f;
+					++teleportSeq;
+				}
+			}
+			if (sendingAway > 0.0f) {
+				const double dx = mc.x - savedX, dz = mc.z - savedZ;
+				if (world == savedWorld && dx * dx + dz * dz < 8.0 * 8.0) {
+					logger::info("Minecraft's player is back in {}", savedName);
+					sendingAway = 0.0f;
+				} else if ((sendingAway -= a_delta) > 0.0f) {
+					return parked;
+				} else {
+					logger::warn("Minecraft's player didn't go back to {}; Skyrim's follows it instead", savedName);
+				}
+			}
+			if (bringingBack > 0.0f) {
+				if (world < proto::kDimNether) {
+					logger::info("Minecraft's player is back in the open world");
+					bringingBack = 0.0f;
+				} else if ((bringingBack -= a_delta) > 0.0f) {
+					return parked;
+				} else {
+					logger::warn("Minecraft's player didn't come back; Skyrim's follows it instead");
+				}
+			}
+			if (!parked && world >= proto::kDimNether) {
+				logger::info("Minecraft's player went into {}: Skyrim's waits in cell {:08X}", world == proto::kDimNether ? "the Nether" : world == proto::kDimEnd ? "the End" : "a world of Minecraft's own",
+					waiting->GetFormID());
+				if (st.skyrimMode) {
+					st.skyrimMode = false;  // nothing of Skyrim's to walk on there
+					logger::info("Skyrim mode off (Minecraft's own world)");
+				}
+				if (auto* lighting = waiting->GetLighting()) {
+					// Skyrim's backdrop there: the Nether's dark red, the End's near black.
+					const bool end = world == proto::kDimEnd;
+					lighting->fogColorNear = end ? RE::Color(10, 8, 14, 0) : RE::Color(51, 8, 8, 0);
+					lighting->fogColorFar = lighting->fogColorNear;
+					lighting->ambient = end ? RE::Color(48, 44, 60, 0) : RE::Color(64, 32, 26, 0);
+					// Skyrim's own things in it (the enemies brought in) seen as far as Minecraft's blocks:
+					// the cell's draw distance and fog were its own (short), so they went unseen.
+					lighting->clipDist = 400000.0f;
+					lighting->fogNear = end ? 30000.0f : 1400.0f;
+					lighting->fogFar = end ? 200000.0f : 9000.0f;
+					lighting->fogPower = 1.0f;
+					lighting->fogClamp = end ? 0.0f : 0.85f;
+					lighting->directional = end ? RE::Color(120, 110, 140, 0) : RE::Color(140, 80, 60, 0);
+					lighting->lightingTemplateInheritanceFlags.reset();
+				}
+				{
+					auto* from = a_player->GetParentCell();
+					auto* ws = a_player->GetWorldspace();
+					if (from == waiting) {
+						from = nullptr, ws = nullptr;  // (already waiting: keep what was noted)
+					}
+					leftCell = from && from->IsInteriorCell() ? from->GetFormID() : (from ? 0 : leftCell);
+					leftWorld = ws ? ws->GetFormID() : (from ? 0 : leftWorld);
+					if (from) {
+						leftPos = a_player->GetPosition();
+					}
+					logger::info("left from {} {:08X}", leftCell ? "interior" : "worldspace", leftCell ? leftCell : leftWorld);
+				}
+				a_player->CenterOnCell(waiting);
+				retry = 5.0f;
+				toldStuck = false;
+				return parked;
+			}
+			if (parked && world <= proto::kDimWorldspaces) {
+				sinceBack += a_delta;
+				const double adx = mc.x - awayX, adz = mc.z - awayZ;
+				if (adx * adx + adz * adz < 4.0 && sinceBack < 20.0f) {
+					return parked;  // still the Nether's (or End's) position: its new one hasn't come
+				}
+				// Still across (not up and down: one falling, with no Skyrim ground under it yet, never
+				// stood still, Skyrim waited on in its empty cell and the player fell out of the world),
+				// for a second; or four seconds back, whatever it's doing.
+				const double sdx = mc.x - settleX, sdz = mc.z - settleZ;
+				if (sinceBack < 4.0f && (settled < 0.0f || sdx * sdx + sdz * sdz > 0.25)) {
+					settleX = mc.x, settleY = mc.y, settleZ = mc.z;
+					settled = 0.0f;
+					return parked;
+				}
+				settled += a_delta;
+				if (settled < 1.0f && sinceBack < 4.0f) {
+					return parked;
+				}
+				settled = -1.0f;
+				// Out of a portal into the open world: Skyrim's player goes where Minecraft's came out.
+				// Moved like a reference to an editor location: the position in Tamriel, anchored on
+				// one of its persistent references (any will do).
+				// SkyCraft+ : back into the same place. Into the worldspace or interior it went to wait
+				// from, if Minecraft's player came back to that kind of place near where it left: out of a
+				// portal built in Whiterun, Tamriel's own (low, no collision) Whiterun was loaded instead
+				// and the player fell through it.
+				const auto    pos = McToSky(mc.x, mc.y, mc.z);
+				RE::TESObjectCELL*  intoCell = nullptr;
+				RE::TESWorldSpace*  into = nullptr;
+				const bool          nearLeft = pos.GetDistance(leftPos) < 400.0f * float(proto::kUnitsPerBlock);
+				if (world == proto::kDimInteriors) {
+					intoCell = leftCell ? RE::TESForm::LookupByID<RE::TESObjectCELL>(leftCell) : nullptr;
+				} else if (auto* ws = leftWorld && !leftCell && nearLeft ? RE::TESForm::LookupByID<RE::TESWorldSpace>(leftWorld) : nullptr) {
+					bool inTamriel = false;
+					for (auto* w = ws; w && !inTamriel; w = w->parentWorld) {
+						inTamriel = w->GetFormID() == 0x3C;
+					}
+					if (inTamriel == (world == proto::kDimTamriel)) {
+						into = ws;
+					}
+				}
+				if (!into && !intoCell && world == proto::kDimTamriel) {
+					into = RE::TESForm::LookupByID<RE::TESWorldSpace>(0x3C);
+				}
+				RE::TESObjectREFR* anchor = nullptr;
+				auto firstRef = [&](RE::TESObjectCELL* a_cell, RE::TESWorldSpace* a_ws) {
+					if (!a_cell) {
+						return;
+					}
+					a_cell->ForEachReference([&](RE::TESObjectREFR* a_ref) {
+						if (a_ref && (!a_ws || a_ref->GetWorldspace() == a_ws)) {
+							anchor = a_ref;
+							return RE::BSContainer::ForEachResult::kStop;
+						}
+						return RE::BSContainer::ForEachResult::kContinue;
+					});
+				};
+				firstRef(intoCell ? intoCell : into ? into->persistentCell : nullptr, into);
+				if (!intoCell && !anchor) {
+					if (!toldStuck) {
+						toldStuck = true;
+						logger::warn("couldn't find {} to go back to; use a door or coc", into ? "the worldspace" : "the interior");
+						RE::SendHUDMessage::ShowHUDMessage("SkyCraft: couldn't take you back to Skyrim; use the console (coc) to leave.");
+					}
+					retry = 5.0f;
+					return parked;
+				}
+				// (After the End's exit portal or a death, Minecraft brings its player back to the portal
+				// it left by: SkyMinecraftWorlds.)
+				logger::info("Minecraft's player is back in {} {:08X}: Skyrim's goes to ({:.0f}, {:.0f}, {:.0f})", intoCell ? "interior" : "worldspace",
+					intoCell ? intoCell->GetFormID() : into->GetFormID(), pos.x, pos.y, pos.z);
+				// TESObjectREFR::MoveTo_Impl (SE 56227, AE 56626), private in CommonLib.
+				using MoveToFn = void (*)(RE::TESObjectREFR*, const RE::ObjectRefHandle&, RE::TESObjectCELL*, RE::TESWorldSpace*, const RE::NiPoint3&, const RE::NiPoint3&);
+				static REL::Relocation<MoveToFn> moveTo{ RELOCATION_ID(56227, 56626) };
+				const RE::ObjectRefHandle anchorHandle = anchor ? anchor->CreateRefHandle() : RE::ObjectRefHandle{};
+				moveTo(a_player, anchorHandle, intoCell ? intoCell : anchor->GetParentCell(), intoCell ? nullptr : into, pos, RE::NiPoint3(0.0f, 0.0f, McYawToHeading(mc.yaw)));
+				returnPin = pos;
+				returnPinTime = 30.0f;
+				retry = 5.0f;
+				return parked;
+			}
+			if (parked && world < proto::kDimNether && !toldStuck) {
+				// A save made in the Nether loaded with Minecraft somewhere else: nothing to follow.
+				toldStuck = true;
+				logger::warn("Skyrim's player is in the waiting cell but Minecraft's is in a Skyrim interior or worldspace");
+				RE::SendHUDMessage::ShowHUDMessage("SkyCraft: Minecraft isn't in the Nether or the End; use the console (coc) to leave this empty cell.");
+			}
+			return parked;
+		}
+
 		void PerFrame(RE::PlayerCharacter* a_player, float a_delta)
 		{
 			auto& st = State();
@@ -537,6 +1127,7 @@ namespace skycraft
 				++epoch;
 				Collision::Get().Reset(epoch);
 				teleportPending = true;
+				homeCheck = true;
 			}
 			mcWasAlive = mcAlive;
 			st.mcInWorld = haveMc && (mc.flags & proto::kMcInWorld);
@@ -546,6 +1137,20 @@ namespace skycraft
 				st.cursorY = st.viewportH / 2;
 			}
 			st.mcScreenOpen = screenOpen;
+			// SkyCraft+ : controller inventory snapping. A screen with slots (the pad jumps between them),
+			// and the cursor follows where Minecraft put it.
+			st.mcSlotScreen = screenOpen && (mc.flags & proto::kMcSlotScreen);
+			if (static std::uint32_t cursorSeen = 0; haveMc && mc.cursorSeq != cursorSeen) {
+				cursorSeen = mc.cursorSeq;
+				if (screenOpen) {
+					st.cursorX = mc.cursorX;
+					st.cursorY = mc.cursorY;
+				}
+			}
+			st.mcUseTarget = haveMc && (mc.flags & proto::kMcUseTarget);
+			if (haveMc && mc.healthFrac > 0.0f) {
+				st.mcHealthFrac = mc.healthFrac;
+			}
 			if (haveMc && mc.sensitivity > 0.0f) {
 				st.sensitivity = mc.sensitivity;
 			}
@@ -557,6 +1162,7 @@ namespace skycraft
 				Input::ReleaseAll();
 			}
 			st.skyrimMenuOpen = menu || loading;
+			Input::PadFrame(a_delta);
 
 			// World identity: exterior worldspace or interior cell. A change wipes MC's collision.
 			if (cell) {
@@ -574,15 +1180,52 @@ namespace skycraft
 			}
 
 			// Skyrim moved the player itself (load door, fast travel, script, loading a save).
-			const auto current = a_player->GetPosition();
+			// SkyCraft+ : just back from the Nether or the End, it's held where Minecraft's player came out
+			// (returnPin). Under Skyrim's land (a stronghold's End portal) Skyrim lifts it out every frame:
+			// taken for Skyrim moving it, each lift sent Minecraft a new teleport (to the surface), it never
+			// caught up and both stood frozen until the hold ran out. The held place counts instead.
+			const auto current = returnPinTime > 0.0f && cell && !cell->IsInteriorCell() ? returnPin : a_player->GetPosition();
 			if (loading) {
 				teleportPending = true;
 				haveLastSet = false;
 				settleTimer = kSettleSeconds;
-			} else if (haveLastSet && current.GetDistance(lastSetPos) > kSkyrimTeleportThreshold) {
-				logger::info("Skyrim moved the player ({:.0f} units); resyncing Minecraft", current.GetDistance(lastSetPos));
-				teleportPending = true;
-				haveLastSet = false;
+			} else if (!st.parked && haveLastSet && current.GetDistance(lastSetPos) > kSkyrimTeleportThreshold) {  // (parked: Minecraft leads, nothing to resync)
+				const float dx = current.x - lastSetPos.x, dy = current.y - lastSetPos.y, dz = current.z - lastSetPos.z;
+				// SkyCraft+ : underground. Down a mine, under Skyrim's land, Skyrim lifts the player back
+				// up to it (no loading screen, same world, mostly straight up). Minecraft is driving and
+				// the mine is real: the lift is ignored and Minecraft's position put back.
+				// Under Skyrim's land, however far: it goes back to where the player last stood on Skyrim's
+				// ground, which a staircase down leaves well behind.
+				const bool lifted = st.puppeting && !teleportPending && dz > 200.0f && (underLandRecently > 0.0f || std::sqrt(dx * dx + dy * dy) < 30.0f * proto::kUnitsPerBlock);
+				if (lifted) {
+					static std::uint32_t lifts = 0;
+					if (++lifts <= 3 || lifts % 600 == 0) {  // it can try every frame
+						logger::info("Skyrim lifted the player out of a mine ({:.0f}, {:.0f}, {:.0f} units); ignored ({} times)", dx, dy, dz, lifts);
+					}
+					a_player->SetPosition(lastSetPos, true);
+				} else {
+					logger::info("Skyrim moved the player ({:.0f} units: {:.0f}, {:.0f}, {:.0f}); resyncing Minecraft", current.GetDistance(lastSetPos), dx, dy, dz);
+					teleportPending = true;
+					haveLastSet = false;
+				}
+			}
+			// SkyCraft+ : the Nether and the End. While parked, Minecraft leads: it gets no teleports.
+			st.mcWorld = haveMc ? mc.dimension : 0u;
+			st.parked = MinecraftWorlds(a_player, cell, loading, haveMc && st.mcInWorld, a_delta);
+			if (st.parked) {
+				teleportPending = false;
+			}
+			// SkyCraft+ : the underground. More than two blocks under Skyrim's land (a mine): nothing of
+			// Skyrim's may be on screen, and blocks must be drawn in the frame anyway (WorldRender).
+			// (Minecraft tells: Skyrim's own land lookup gives up far below the map.)
+			{
+				const bool under = !loading && !st.parked && haveMc && st.mcInWorld && (mc.flags & proto::kMcUnderLand) != 0;
+				if (under != st.playerUnderLand) {
+					logger::info("underground: {} Skyrim's land", under ? "under" : "out from under");
+				}
+				st.playerUnderLand = under;
+				underLandRecently = under ? 3.0f : std::max(0.0f, underLandRecently - a_delta);
+				DeepHide::PerFrame(a_player, under && (mc.flags & proto::kMcDeepUnderLand) != 0, a_delta);  // SkyCraft+
 			}
 			if (teleportPending && !loading) {
 				++teleportSeq;
@@ -590,6 +1233,12 @@ namespace skycraft
 				st.yaw = HeadingToMcYaw(a_player->data.angle.z);
 				st.pitch = a_player->data.angle.x * kRadToDeg;
 				st.lookInitialized = true;
+				// SkyCraft+ : mode switch. Back from Skyrim's own controls, keep looking where Skyrim's
+				// camera looked (its third-person camera turns without turning the body).
+				if (skyrimLookPending) {
+					skyrimLookPending = false;
+					SeedLookFromCamera(st, true);
+				}
 			}
 
 			// Mouse look (MC's formula), integrated here so the Skyrim camera has zero added latency.
@@ -615,9 +1264,15 @@ namespace skycraft
 			if ((takeoverNow != nullptr) != (takeover != nullptr)) {
 				if (takeoverNow) {
 					logger::info("Skyrim takes the player ({})", takeoverNow);
+					// One health pool: Skyrim carries on from Minecraft's share (Minecraft takes
+					// Skyrim's back when it drives again).
+					if (st.puppeting && haveMc && mc.healthFrac > 0.0f) {
+						SetHealthFraction(a_player, mc.healthFrac);
+					}
 				} else {
 					logger::info("Skyrim hands the player back");
 					teleportPending = true;  // Minecraft picks up wherever Skyrim left the player
+					skyrimLookPending = true;
 				}
 			}
 			takeover = takeoverNow;
@@ -642,6 +1297,89 @@ namespace skycraft
 				logger::info("puppet {}", puppet ? "on (Minecraft drives the player)" : "off");
 			}
 			st.puppeting = puppet;
+
+			// SkyCraft+ : the Nether and the End. Just back: held where it came out (see returnPin).
+			// Until Minecraft drives it again out here (while still in the waiting cell, Minecraft drives
+			// the parked player: that doesn't count), and through the load on arrival too.
+			if (returnPinTime > 0.0f) {
+				const bool arrived = cell && !st.parked;
+				returnPinTime = (puppet && arrived && !loading) ? 0.0f : returnPinTime - a_delta;
+				if (arrived && !(puppet && !loading)) {
+					a_player->SetPosition(returnPin, true);
+					if (auto* controller = a_player->GetCharController()) {
+						controller->SetLinearVelocityImpl(RE::hkVector4(0.0f, 0.0f, 0.0f, 0.0f));
+						controller->fallStartHeight = returnPin.z;
+						controller->fallTime = 0.0f;
+					}
+					lastSetPos = returnPin;  // not "Skyrim moved the player"
+					haveLastSet = true;
+				}
+				if (returnPinTime <= 0.0f) {
+					logger::info("back in the open world: Skyrim's player let go ({})", puppet ? "Minecraft drives it" : "timed out");
+				}
+			}
+
+			// SkyCraft+ : underground. Deep under Skyrim's land, Skyrim thinks the player fell out of
+			// the world and sends them back to their "last known good position" on the surface.
+			// While Minecraft is playing, wherever the player is counts as good.
+			if (st.mcInWorld && !loading && !a_player->IsDead() && (puppet || takeover)) {
+				a_player->GetPlayerRuntimeData().lastKnownGoodPosition = puppet ? McToSky(mc.x, mc.y, mc.z) : current;  // (current may be Skyrim's lift, undone above)
+				a_player->GetPlayerFlags().returnToLastKnownGoodPosition = false;
+			}
+			bool rightHand = false, leftHand = false;
+			if (puppet && st.skyrimHandsOption) {
+				SkyrimHands(a_player, rightHand, leftHand);
+				MixHands(a_player, rightHand, leftHand);  // SkyCraft+ : hand mixing
+			}
+			if (rightHand != st.rightHandSkyrim || leftHand != st.leftHandSkyrim) {
+				logger::info("hands: right {}, left {}", rightHand ? "Skyrim's" : "Minecraft's", leftHand ? "Skyrim's" : "Minecraft's");
+			}
+			st.rightHandSkyrim = rightHand;
+			st.leftHandSkyrim = leftHand;
+			const bool skyrimDrives = takeover && haveMc && st.mcInWorld && !loading && !a_player->IsDead();
+			st.skyrimDrives = skyrimDrives;
+			if (skyrimDrives && !menu) {
+				SeedLookFromCamera(st, false);  // Minecraft's player looks where Skyrim's camera does
+				// SkyCraft+ : Skyrim mode on Minecraft blocks. Havok is told the player stands on one
+				// (DigPhysics), but the animation can stay in its jump/fall from a moment Skyrim thought
+				// otherwise (seen in third person): standing on a block, it lands.
+				// (Only once it's lasted: a real jump starts on a block too.)
+				static float stuckInJump = 0.0f;
+				bool         jumping = false;
+				float        rising = 0.0f;
+				if (auto* controller = a_player->GetCharController()) {
+					RE::hkVector4 velocity;
+					controller->GetLinearVelocityImpl(velocity);
+					alignas(16) float v[4];
+					_mm_store_ps(v, velocity.quad);
+					rising = v[2];
+				}
+				// SkyCraft+ : the falling animation on blocks (Known bugs). Rising up to Havok's own
+				// "taking off" speed still counts as standing (settling onto a block plane pushes up a
+				// little), and a jump state lasting a second with no landing says why, now and then.
+				const bool onBlock = Dig::PlayerOnBlock();
+				const bool inJump = a_player->GetGraphVariableBool("bInJumpState", jumping) && jumping;
+				const bool stuck = onBlock && rising <= 0.3f && inJump;
+				stuckInJump = stuck ? stuckInJump + a_delta : 0.0f;
+				static float longJump = 0.0f;
+				static int   whyLogged = 0;
+				longJump = inJump ? longJump + a_delta : 0.0f;
+				if (longJump > 1.0f && !stuck) {
+					longJump = -4.0f;  // (again in 5 s at most)
+					if (whyLogged++ < 20) {
+						logger::info("dig: in a jump or fall animation for a second: on a Minecraft block {}, rising {:.2f}, Havok state {}, in the air {}", onBlock, rising,
+							a_player->GetCharController() ? static_cast<int>(a_player->GetCharController()->context.currentState) : -1, a_player->IsInMidair());
+					}
+				}
+				if (stuckInJump > 0.25f) {
+					stuckInJump = 0.0f;
+					a_player->NotifyAnimationGraph("JumpLand");
+					static int logged = 0;
+					if (logged++ < 20) {
+						logger::info("dig: standing on a Minecraft block in a jump or fall animation: landed");
+					}
+				}
+			}
 			if (puppet) {
 				EnsureControlsEnabled();
 				Game::NoteFrameStep('P');
@@ -654,8 +1392,16 @@ namespace skycraft
 			st.mcGuiScale = haveMc ? static_cast<int>(mc.guiScale) : 0;
 			Input::SetActivatePromptKey(puppet);
 			Combat::PerFrame(a_player, puppet, a_delta);
+			Combat::WatchPlayerHits(a_player, a_delta);
+			SkyrimShots::PerFrame(a_player, (puppet || skyrimDrives) && haveMc && st.mcInWorld, a_delta);
+			MinecraftEnemies::PerFrame(a_player, a_delta, st.parked, st.mcWorld, mc.x, mc.y, mc.z);  // SkyCraft+
+			MapMarkers::PerFrame(a_player, a_delta);  // SkyCraft+
+			SkyInventory::PerFrame(a_player, haveMc && (mc.flags & proto::kMcWantsSkyInventory) != 0, a_delta);  // SkyCraft+
+			if (haveMc && st.mcInWorld) {
+				MinecraftEnemies::StopShotsAtBlocks(a_player);  // SkyCraft+
+			}
 			WorldRender::UpdateRagdoll(a_player, haveMc && st.mcInWorld);
-			if (puppet) {
+			if (puppet || skyrimDrives) {
 				NpcBlocks::PushActorsOut(a_player, a_delta);
 			}
 
@@ -785,7 +1531,10 @@ namespace skycraft
 				motion.frameMsMax = std::max(motion.frameMsMax, frameMs);
 			}
 
-			if (puppet) {
+			// SkyCraft+ : the Nether and the End. On the way into the waiting cell, Skyrim's player
+			// stays put (Minecraft's position there means nothing in Skyrim's world).
+			const bool onTheWay = st.mcWorld >= proto::kDimNether && !st.parked;
+			if (puppet && !onTheWay) {
 				const auto pos = McToSky(feetX, feetY, feetZ);
 				a_player->SetPosition(pos, true);
 				if (auto* controller = a_player->GetCharController()) {
@@ -872,11 +1621,14 @@ namespace skycraft
 				// anyone is fighting them, and go away after. Its first-person arms and weapons stay
 				// hidden meanwhile (Minecraft shows the hands).
 				const auto weapons = a_player->AsActorState()->GetWeaponState();
-				const bool fighting = Combat::PlayerEngaged();
+				// SkyCraft+ : hand ownership. A hand Skyrim holds keeps its weapon or spell out and
+				// Skyrim's first-person arms showing.
+				const bool skyrimHand = rightHand || leftHand;
+				const bool fighting = Combat::PlayerEngaged() || skyrimHand;
 				// Always hidden while Minecraft drives (Minecraft draws the hands). Showing them again
 				// after a fight un-hid arms Skyrim had hidden itself meanwhile (putting weapons away),
 				// and they then floated in view until the model was rebuilt.
-				HideFirstPersonMeshes(a_player, true);
+				HideFirstPersonMeshes(a_player, !skyrimHand);
 
 				const float bobRollDeg = std::sin(phase) * bob * 3.0f;
 				idealRotNoRoll = BuildCameraRotation(camHeading, camPitchDeg * kDegToRad, 0.0f);
@@ -967,23 +1719,94 @@ namespace skycraft
 				}
 			}
 
+			// SkyCraft+ : riding as Minecraft's player. In Skyrim's third-person riding camera, Skyrim's
+			// body is hidden and Minecraft's (sent in its riding pose, facing the horse's way) is drawn
+			// in the saddle: its hips (12 of its 16ths of a block above its feet) on Skyrim's pelvis.
+			bool  rideAsMinecraft = false;
+			float riderYaw = st.yaw;
+			if (st.rideAsMinecraft && skyrimDrives && !st.skyrimMode && a_player->IsOnMount()) {
+				auto* camera = RE::PlayerCamera::GetSingleton();
+				auto* root = a_player->Get3D(false);
+				auto* pelvis = root ? root->GetObjectByName("NPC Pelvis [Pelv]") : nullptr;
+				if (camera && !camera->IsInFirstPerson() && pelvis) {
+					rideAsMinecraft = true;
+					RE::NiPoint3 seat = pelvis->world.translate;
+					seat.z -= static_cast<float>(proto::kUnitsPerBlock * 0.75);
+					const auto seatMc = SkyToMc(seat);
+					st.feetX = seatMc.x, st.feetY = seatMc.y, st.feetZ = seatMc.z;
+					st.feetValid = true;
+					RE::NiPointer<RE::Actor> mount;
+					const float heading = a_player->GetMount(mount) && mount ? mount->data.angle.z : a_player->data.angle.z;
+					riderYaw = std::fmod(HeadingToMcYaw(heading) + 360.0f, 360.0f);
+				}
+			}
+			if (rideAsMinecraft != st.ridingAsMinecraft) {
+				st.ridingAsMinecraft = rideAsMinecraft;
+				logger::info("riding: {}", rideAsMinecraft ? "Minecraft's player in the saddle, Skyrim's body hidden" : "stopped (or Skyrim's camera)");
+				if (!rideAsMinecraft) {
+					st.feetValid = false;
+				}
+			}
+			HideRiderMeshes(a_player, rideAsMinecraft);
+
 			captureTimer -= a_delta;
 			hudTimer -= a_delta;
-			if (hudTimer <= 0.0f) {
+			if (hudTimer <= 0.0f || rightHand != hudRightHand || leftHand != hudLeftHand) {
 				hudTimer = 0.5f;
-				HideHud(ui, puppet);
+				hudRightHand = rightHand;
+				hudLeftHand = leftHand;
+				HideHud(ui, puppet, rightHand || leftHand);
 			}
 
 			// Tell Minecraft where Skyrim's player is and where they're looking.
 			proto::SkyState sky{};
-			sky.flags = (cell ? proto::kSkyInGame : 0u) | (menu ? proto::kSkyMenuOpen : 0u) | (loading ? proto::kSkyLoading : 0u);
+			sky.flags = (cell ? proto::kSkyInGame : 0u) | (menu ? proto::kSkyMenuOpen : 0u) | (loading ? proto::kSkyLoading : 0u) |
+			            (skyrimDrives ? proto::kSkyDrivesPlayer : 0u) | (rightHand ? proto::kSkyRightHandSkyrim : 0u) |
+			            (leftHand ? proto::kSkyLeftHandSkyrim : 0u) | ((puppet || skyrimDrives) && a_player->IsBlocking() ? proto::kSkyBlocking : 0u) |
+			            (st.parked ? proto::kSkyParked : 0u) | (bringingBack > 0.0f ? proto::kSkyBringBack : 0u) |
+			            (rideAsMinecraft ? proto::kSkyRiding : 0u);
+			static float         placeTimer = 0.0f;
+			static std::uint32_t placeFlags = 0;
+			static std::uint32_t placeWorld = 0;
+			if ((placeTimer -= a_delta) <= 0.0f || placeWorld != worldId) {  // at once on a world change (Minecraft picks its dimension)
+				placeWorld = worldId;
+				placeTimer = 0.5f;
+				const auto flags = PlaceFlags(a_player, cell);
+				if (flags != placeFlags) {
+					logger::info("place: {}{}{}{}{}{}{}", flags & proto::kPlaceInterior ? "interior " : "exterior ", flags & proto::kPlaceTamriel ? "tamriel " : "", flags & proto::kPlaceTown ? "town " : "",
+						flags & proto::kPlaceSettlement ? "settlement " : "",
+						flags & proto::kPlaceDungeon ? "dungeon " : "", flags & proto::kPlaceRain ? "rain " : "", flags & proto::kPlaceSnow ? "snow" : "");
+				}
+				placeFlags = flags;
+			}
+			sky.placeFlags = placeFlags;
+			// SkyCraft+ : the underground lines up with Tamriel's sea level (cities share its coordinates).
+			static float seaLevel = [] {
+				auto* tamriel = RE::TESForm::LookupByID<RE::TESWorldSpace>(0x3C);
+				return tamriel ? tamriel->GetDefaultWaterHeight() / float(proto::kUnitsPerBlock) : 0.0f;
+			}();
+			sky.seaLevel = seaLevel;
+			sky.handKinds[0] = rightHand ? HandKind(a_player, false) : proto::kHandNone;
+			sky.handKinds[1] = leftHand ? HandKind(a_player, true) : proto::kHandNone;
+			if (sky.handKinds[0] >= proto::kHandGreatsword && sky.handKinds[0] <= proto::kHandCrossbow) {
+				sky.handKinds[1] = proto::kHandNone;  // two hands, one weapon
+			}
+			if (const float maxHealth = a_player->GetActorValueMax(RE::ActorValue::kHealth); maxHealth > 0.0f) {
+				sky.healthFrac = std::clamp(a_player->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth) / maxHealth, 0.0f, 1.0f);
+			}
 			const auto skyMc = SkyToMc(current);
 			sky.worldId = worldId;
 			sky.collisionEpoch = epoch;
 			sky.posX = skyMc.x;
 			sky.posY = skyMc.y;
 			sky.posZ = skyMc.z;
-			sky.yaw = st.yaw;
+			if (sendingAway > 0.0f) {
+				sky.sendToWorld = static_cast<std::uint8_t>(savedWorld);
+				sky.posX = savedX;
+				sky.posY = savedY;
+				sky.posZ = savedZ;
+			}
+			sky.yaw = rideAsMinecraft ? riderYaw : st.yaw;  // SkyCraft+ : the rider faces the horse's way
 			sky.pitch = st.pitch;
 			sky.teleportSeq = teleportSeq;
 			sky.viewportW = static_cast<std::uint32_t>(st.viewportW.load());
@@ -992,9 +1815,13 @@ namespace skycraft
 				sky.gameHour = calendar->GetHour();
 			}
 			link.WriteSkyState(sky);
+			lastSky = sky;
+			lastSkyTick = GetTickCount64();
 
 			settleTimer -= a_delta;
-			if (haveMc && !loading && cell && settleTimer <= 0.0f) {
+			// SkyCraft+ : not while parked: the empty cell's (or anything else's) collision would be solid
+			// in the Nether and the End, and its unknown parts kept mobs there from pathing.
+			if (haveMc && !loading && cell && settleTimer <= 0.0f && !st.parked) {
 				Perf::Scope timer(Perf::kCollision);
 				Collision::Get().Update(puppet ? McVec{ mc.x, mc.y, mc.z } : skyMc);
 			}
@@ -1023,7 +1850,7 @@ namespace skycraft
 			}
 			// Not while the world is still settling after a load (its cells are still being attached).
 			static float digSettled = 0.0f;
-			digSettled = puppet && !loading && cell ? digSettled + a_delta : 0.0f;
+			digSettled = (puppet || skyrimDrives) && !loading && cell ? digSettled + a_delta : 0.0f;
 			{
 				Perf::Scope timer(Perf::kDigMeshes);
 				Dig::UpdateMeshes(digSettled > 3.0f ? a_player : nullptr, a_delta, !dugChanged.empty());
@@ -1036,7 +1863,28 @@ namespace skycraft
 		{
 			static void thunk(RE::PlayerCharacter* a_this, float a_delta)
 			{
-				func(a_this, a_delta);
+				// SkyCraft+ : off Skyrim's world. Minecraft's player flown past Skyrim's invisible walls
+				// took Skyrim's to where there are no cells, and Skyrim's own update crashed on the
+				// missing cell (SkyrimSE+0x757322). Back where it last had one, without this update.
+				static RE::NiPoint3 lastWithCell;
+				static bool         haveLastWithCell = false;
+				static int          rescues = 0;
+				bool                offWorld = false;
+				auto*               ui = RE::UI::GetSingleton();
+				if (auto* cell = a_this->GetParentCell()) {
+					lastWithCell = a_this->GetPosition();
+					haveLastWithCell = !cell->IsInteriorCell();  // (only out in the open world)
+				} else if (haveLastWithCell && State().puppeting && !State().parked && State().mcWorld == proto::kDimTamriel && a_this->Is3DLoaded() && ui &&
+						   !ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME)) {
+					if (++rescues <= 5) {
+						logger::warn("Skyrim's player is off its world (no cell): back to ({:.0f}, {:.0f}, {:.0f})", lastWithCell.x, lastWithCell.y, lastWithCell.z);
+					}
+					a_this->SetPosition(lastWithCell, true);
+					offWorld = true;  // Skyrim's own update skipped this frame (ours still runs)
+				}
+				if (!offWorld) {
+					func(a_this, a_delta);
+				}
 				try {
 					Perf::Scope timer(Perf::kUpdate);
 					PerFrame(a_this, a_delta);
@@ -1291,11 +2139,133 @@ namespace skycraft
 			return ui && AnyBlockingMenuOpen(ui);
 		}
 
+		// SkyCraft+ : hand ownership. With one hand Skyrim's and the other Minecraft's, Skyrim's
+		// first-person arm on Minecraft's side is collapsed (its upper arm bone scaled to almost
+		// nothing, which takes the forearm and hand with it) right before the frame is drawn, after
+		// all of the frame's animation: Minecraft draws that hand. Put back when it isn't needed.
+		void BeforeRenderWorld()
+		{
+			static std::vector<RE::NiPointer<RE::NiAVObject>> collapsed;
+			auto&                                             st = State();
+			auto*                                             player = RE::PlayerCharacter::GetSingleton();
+			std::vector<RE::NiAVObject*>                      bones;
+			if (player && st.puppeting && (st.rightHandSkyrim || st.leftHandSkyrim)) {
+				if (auto* root = player->Get3D(true)) {
+					auto* left = root->GetObjectByName("NPC L UpperArm [LUar]");
+					auto* right = root->GetObjectByName("NPC R UpperArm [RUar]");
+					// SkyCraft+ : third person (Minecraft's F5): Skyrim's camera stays a first-person
+					// one, so its arms floated in front of it. Both go; Minecraft draws the body.
+					const bool thirdPerson = mc.cameraMode != 0;
+					if ((thirdPerson || !st.leftHandSkyrim) && left) {
+						bones.push_back(left);
+					}
+					if ((thirdPerson || !st.rightHandSkyrim) && right) {
+						bones.push_back(right);
+					}
+				}
+			}
+			RE::NiUpdateData update{};
+			for (auto& bone : collapsed) {
+				if (bone && std::ranges::find(bones, bone.get()) == bones.end()) {
+					bone->local.scale = 1.0f;
+					bone->Update(update);
+				}
+			}
+			std::erase_if(collapsed, [&](const RE::NiPointer<RE::NiAVObject>& a_bone) { return std::ranges::find(bones, a_bone.get()) == bones.end(); });
+			for (auto* bone : bones) {
+				if (std::ranges::none_of(collapsed, [&](const RE::NiPointer<RE::NiAVObject>& a_bone) { return a_bone.get() == bone; })) {
+					logger::info("hands: a Skyrim first-person arm hidden ({})", mc.cameraMode != 0 ? "third person" : "Minecraft's hand");
+					collapsed.emplace_back(bone);
+				}
+				bone->local.scale = 0.001f;
+				bone->Update(update);
+			}
+		}
+
+		void ReportPause()
+		{
+			auto*      ui = RE::UI::GetSingleton();
+			const auto now = GetTickCount64();
+			const auto last = lastSkyTick.load();
+			// Only once the per-frame update has really stopped (it writes the state otherwise).
+			if (!ui || !ui->GameIsPaused() || last == 0 || now - last < 150) {
+				return;
+			}
+			auto sky = lastSky;
+			sky.flags |= proto::kSkyPaused | proto::kSkyMenuOpen;
+			Link::Get().WriteSkyState(sky);
+		}
+
+		// SkyCraft+ : mode switch. Skyrim mode is one more reason Skyrim takes the player
+		// (SkyrimTakeover): its controls, camera, HUD, weapons and magic, while Minecraft's player
+		// follows along. Back in Minecraft mode Minecraft picks the player up where Skyrim's is.
+		void ToggleSkyrimMode()
+		{
+			auto& st = State();
+			if (!st.skyrimMode && !st.mcInWorld) {
+				return;  // nothing to switch from: Skyrim already has the player
+			}
+			if (!st.skyrimMode && (st.parked || st.mcWorld >= proto::kDimNether)) {
+				// SkyCraft+ : the Nether and the End have nothing of Skyrim's to walk on.
+				RE::SendHUDMessage::ShowHUDMessage("SkyCraft: Skyrim mode isn't available in Minecraft's own worlds");
+				return;
+			}
+			st.skyrimMode = !st.skyrimMode;
+			Input::ReleaseAll();
+			logger::info("mode switch: {} mode", st.skyrimMode ? "Skyrim" : "Minecraft");
+			RE::SendHUDMessage::ShowHUDMessage(st.skyrimMode ? "SkyCraft: Skyrim mode" : "SkyCraft: Minecraft mode");
+		}
+
 		void OnGameLoaded()
 		{
+			MapMarkers::OnGameLoaded();
+			MinecraftEnemies::OnGameLoaded();
 			teleportPending = true;
+			homeCheck = true;
+			bringingBack = 0.0f;
+			sendingAway = 0.0f;
 			haveLastSet = false;
 			State().lookInitialized = false;
+		}
+
+		// SkyCraft+ : saves made in the Nether or the End keep which, and where (the SKSE co-save).
+		constexpr std::uint32_t kWorldRecord = 'MCWD';
+
+		void OnSave(SKSE::SerializationInterface* a_intfc)
+		{
+			if (!State().parked || mc.dimension < proto::kDimNether) {
+				return;
+			}
+			const std::uint32_t world = mc.dimension;
+			if (!a_intfc->OpenRecord(kWorldRecord, 1) || !a_intfc->WriteRecordData(world) || !a_intfc->WriteRecordData(mc.x) || !a_intfc->WriteRecordData(mc.y) ||
+				!a_intfc->WriteRecordData(mc.z)) {
+				logger::warn("couldn't keep Minecraft's world in the save");
+				return;
+			}
+			logger::info("saved in {} at ({:.0f}, {:.0f}, {:.0f})", world == proto::kDimNether ? "the Nether" : "the End", mc.x, mc.y, mc.z);
+		}
+
+		void OnLoad(SKSE::SerializationInterface* a_intfc)
+		{
+			std::uint32_t type = 0, version = 0, length = 0;
+			while (a_intfc->GetNextRecordInfo(type, version, length)) {
+				std::uint32_t world = 0;
+				double        x = 0.0, y = 0.0, z = 0.0;
+				if (type == kWorldRecord && version == 1 && a_intfc->ReadRecordData(world) && a_intfc->ReadRecordData(x) && a_intfc->ReadRecordData(y) &&
+					a_intfc->ReadRecordData(z) && (world == proto::kDimNether || world == proto::kDimEnd)) {
+					savedWorld = world;
+					savedX = x, savedY = y, savedZ = z;
+					savedCheck = true;
+					logger::info("this save was made in {} at ({:.0f}, {:.0f}, {:.0f})", world == proto::kDimNether ? "the Nether" : "the End", x, y, z);
+				}
+			}
+		}
+
+		void OnRevert(SKSE::SerializationInterface*)
+		{
+			savedWorld = 0;
+			savedCheck = false;
+			sendingAway = 0.0f;
 		}
 	}
 }

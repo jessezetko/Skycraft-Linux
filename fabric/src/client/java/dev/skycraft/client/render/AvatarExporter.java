@@ -56,7 +56,12 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.animal.happyghast.HappyGhast;
+import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
+import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
+import net.minecraft.world.entity.boss.wither.WitherBoss;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.monster.Ghast;
 import net.minecraft.world.entity.projectile.ItemSupplier;
 import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
 import net.minecraft.world.item.ItemDisplayContext;
@@ -87,7 +92,8 @@ final class AvatarExporter implements SubmitNodeCollector {
 	private static final int UV_RAW = 0, UV_BLOCK_ATLAS = 1, UV_ITEM_ATLAS = 2;
 	private static final Direction[] FACES_AND_NONE = { null, Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST };
 	private static final double SCENE_RANGE = 64.0;
-	private static final int SCENE_MAX_ENTITIES = 48;
+	private static final int SCENE_MAX_ENTITIES = 128;  // SkyCraft+ : many mobs (was 48)
+	private static final double FAR_SCENE_RANGE = 192.0; // SkyCraft+ : bosses and ghasts
 	private static final double BLOCK_ENTITY_RANGE = 48.0;
 	private static final int SCENE_MAX_BLOCK_ENTITIES = 256;
 	private static boolean warnedBlockEntity;
@@ -142,7 +148,11 @@ final class AvatarExporter implements SubmitNodeCollector {
 		this.atlas = atlas;
 		var player = minecraft.player;
 		Camera camera = minecraft.gameRenderer.mainCamera();
-		if (player == null || !camera.isDetached()) {
+		// While Skyrim drives its own player, its body is the one on screen. SkyCraft+ : except on a
+		// Skyrim horse: Skyrim draws this body in the saddle (sitting, facing the horse's way).
+		var sky = dev.skycraft.client.SkyClient.sky();
+		boolean riding = sky.riding() && sky.skyrimDrives();
+		if (player == null || (!riding && (!camera.isDetached() || sky.skyrimDrives()))) {
 			this.sendEmpty(Proto.REN_AVATAR, false);
 			return;
 		}
@@ -151,6 +161,15 @@ final class AvatarExporter implements SubmitNodeCollector {
 			var dispatcher = minecraft.getEntityRenderDispatcher();
 			dispatcher.prepare(camera, minecraft.crosshairPickEntity);
 			EntityRenderState state = dispatcher.extractEntity(player, partialTick);
+			if (riding && state instanceof HumanoidRenderState rider) {
+				rider.isPassenger = true;
+				rider.bodyRot = sky.yaw;
+				rider.yRot = 0.0F;
+				rider.xRot = 0.0F;
+				rider.walkAnimationSpeed = 0.0F;
+				rider.isCrouching = false;
+				rider.pose = Pose.STANDING;
+			}
 			CameraRenderState cameraState = minecraft.gameRenderer.gameRenderState().levelRenderState.cameraRenderState;
 			// At the origin: positions come out relative to the player's feet.
 			dispatcher.submit(state, cameraState, 0.0, 0.0, 0.0, new PoseStack(), this);
@@ -292,13 +311,38 @@ final class AvatarExporter implements SubmitNodeCollector {
 		dispatcher.prepare(camera, minecraft.crosshairPickEntity);
 		CameraRenderState cameraState = minecraft.gameRenderer.gameRenderState().levelRenderState.cameraRenderState;
 		PoseStack pose = new PoseStack();
-		int entities = 0;
+		// SkyCraft+ : many mobs. The nearest ones (those behind the camera counting as twice as far)
+		// are the ones drawn, up to the limit: taken in Minecraft's own order, past about 45 mobs new
+		// ones were invisible however close (and solid).
+		var look = camera.forwardVector();
+		List<Entity> wanted = new ArrayList<>();
 		for (Entity e : level.entitiesForRendering()) {
+			boolean big = e instanceof EnderDragon || e instanceof EndCrystal || e instanceof WitherBoss || e instanceof Ghast || e instanceof HappyGhast;
+			double range = big ? FAR_SCENE_RANGE : SCENE_RANGE;
 			if (e == player || e instanceof ItemEntity || e instanceof AbstractArrow || e instanceof ItemSupplier || e instanceof SkyrimActorEntity
-				|| e.distanceToSqr(cam) > SCENE_RANGE * SCENE_RANGE || entities >= SCENE_MAX_ENTITIES) {
+				|| e.distanceToSqr(cam) > range * range) {
 				continue;
 			}
-			entities++;
+			wanted.add(e);
+		}
+		java.util.function.ToDoubleFunction<Entity> away = e -> {
+			double dx = e.getX() - cam.x, dy = e.getY() - cam.y, dz = e.getZ() - cam.z;
+			double d2 = dx * dx + dy * dy + dz * dz;
+			return dx * look.x() + dy * look.y() + dz * look.z() < -2.0 ? d2 * 4.0 : d2;
+		};
+		wanted.sort(java.util.Comparator.comparingDouble(away));
+		int entities = 0;
+		for (Entity e : wanted) {
+			// SkyCraft+ : the Nether and the End. The big ones that fight from afar (the Ender Dragon
+			// and its crystals, the Wither, ghasts) are drawn as far as Minecraft tracks them, and
+			// don't count against the limit.
+			boolean big = e instanceof EnderDragon || e instanceof EndCrystal || e instanceof WitherBoss || e instanceof Ghast || e instanceof HappyGhast;
+			if (!big && entities >= SCENE_MAX_ENTITIES) {
+				continue;
+			}
+			if (!big) {
+				entities++;
+			}
 			try {
 				EntityRenderState state = dispatcher.extractEntity(e, partialTick);
 				dispatcher.submit(state, cameraState, state.x - origin[0], state.y - origin[1], state.z - origin[2], pose, this);
@@ -826,14 +870,99 @@ final class AvatarExporter implements SubmitNodeCollector {
 	public void submitShadow(PoseStack poseStack, float radius, List<EntityRenderState.ShadowPiece> pieces) {
 	}
 
+	/** SkyCraft+ : name tags (named mobs, other players), placed as Minecraft places them, in white. */
 	@Override
 	public void submitNameTag(PoseStack poseStack, @Nullable Vec3 nameTagAttachment, int offset, Component name, boolean seeThrough, int lightCoords,
 		CameraRenderState camera) {
+		int[] widths = asciiWidths();
+		if (nameTagAttachment == null || widths == null) {
+			return;
+		}
+		FormattedCharSequence text = name.getVisualOrderText();
+		int[] width = { 0 };
+		text.accept((index, style, codepoint) -> {
+			width[0] += codepoint == ' ' ? 4 : (codepoint < 256 && widths[codepoint] > 0 ? widths[codepoint] : widths['?']) + 1;
+			return true;
+		});
+		poseStack.pushPose();
+		poseStack.translate(nameTagAttachment.x, nameTagAttachment.y + 0.5, nameTagAttachment.z);
+		poseStack.rotate(camera.orientation);
+		poseStack.scale(0.025F, -0.025F, 0.025F);
+		this.submitText(poseStack, -width[0] / 2.0F, offset, text, false, Font.DisplayMode.NORMAL, net.minecraft.util.LightCoordsUtil.pack(15, 15), 0xFFFFFFFF, 0, 0);
+		poseStack.popPose();
 	}
 
+	/**
+	 * SkyCraft+ : text (signs). Minecraft's glyphs live in an atlas built at run time, which Skyrim
+	 * can't be sent; its plain bitmap font (textures/font/ascii.png, 16 by 16 characters of 8 by 8)
+	 * can, and the letters are cut from that, as wide as each one's pixels. Other characters: '?'.
+	 */
 	@Override
 	public void submitText(PoseStack poseStack, float x, float y, FormattedCharSequence string, boolean dropShadow, Font.DisplayMode displayMode, int lightCoords,
 		int color, int backgroundColor, int outlineColor) {
+		int texture = textureId(ASCII_FONT);
+		int[] widths = asciiWidths();
+		if (texture < 0 || widths == null) {
+			return;
+		}
+		this.capture.flush();
+		Batch batch = this.batch(texture, UV_RAW, SOLID);
+		Matrix4f pose = poseStack.last().pose();
+		Vector3f p = new Vector3f();
+		float[] pen = { x };
+		string.accept((index, style, codepoint) -> {
+			int c = codepoint < 256 && widths[codepoint] > 0 ? codepoint : codepoint == ' ' ? ' ' : '?';
+			if (c == ' ') {
+				pen[0] += 4.0F;
+				return true;
+			}
+			int argb = style.getColor() != null ? 0xFF000000 | style.getColor().getValue() : (color >>> 24) == 0 ? 0xFF000000 | color : color;
+			float w = widths[c];
+			float u0 = (c % 16) / 16.0F, v0 = (c / 16) / 16.0F, u1 = u0 + w / 128.0F, v1 = v0 + 8.0F / 128.0F;
+			float x0 = pen[0], x1 = pen[0] + w, y0 = y, y1 = y + 8.0F;
+			float[][] corners = { { x0, y0, u0, v0 }, { x0, y1, u0, v1 }, { x1, y1, u1, v1 }, { x1, y0, u1, v0 } };
+			for (int side = 0; side < 2; side++) {  // both windings: seen from the front whichever way round Skyrim culls
+				for (int k = 0; k < 4; k++) {
+					float[] v = corners[side == 0 ? k : 3 - k];
+					pose.transformPosition(v[0], v[1], 0.0F, p);
+					batch.add(p.x(), p.y(), p.z(), v[2], v[3], argb, lightCoords, OverlayTexture.NO_OVERLAY);
+				}
+			}
+			pen[0] += w + 1.0F;
+			return true;
+		});
+	}
+
+	private static final Identifier ASCII_FONT = Identifier.withDefaultNamespace("textures/font/ascii.png");
+	private static int @Nullable [] asciiWidths;
+	private static boolean asciiMissing;  // couldn't be read: not tried again for every text
+
+	/** Each character's width in ascii.png: its rightmost column with any pixel, plus one (0: none). */
+	private static int @Nullable [] asciiWidths() {
+		if (asciiWidths != null || asciiMissing) {
+			return asciiWidths;
+		}
+		NativeImage image = readTexture(ASCII_FONT);
+		if (image == null) {
+			asciiMissing = true;
+			return null;
+		}
+		int[] widths = new int[256];
+		try (image) {
+			int cell = image.getWidth() / 16;
+			for (int c = 0; c < 256; c++) {
+				for (int col = cell - 1; col >= 0 && widths[c] == 0; col--) {
+					for (int row = 0; row < cell; row++) {
+						if ((image.getPixel((c % 16) * cell + col, (c / 16) * cell + row) >>> 24) != 0) {
+							widths[c] = (col + 1) * 8 / cell;
+							break;
+						}
+					}
+				}
+			}
+		}
+		asciiWidths = widths;
+		return widths;
 	}
 
 	@Override

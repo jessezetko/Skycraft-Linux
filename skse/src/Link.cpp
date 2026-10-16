@@ -226,6 +226,7 @@ namespace skycraft
 		std::memset(base_ + proto::kOffActorTable, 0, sizeof(proto::ActorTable));
 		std::memset(base_ + proto::kOffEventRing, 0, proto::kEventRingDataOff);
 		std::memset(base_ + proto::kOffWorldEntities, 0, sizeof(proto::WorldEntities));
+		std::memset(base_ + proto::kOffSkyrimShots, 0, sizeof(proto::SkyrimShots));
 		std::memset(base_ + proto::kOffRenderRing, 0, proto::kRenRingDataOff);
 		header->version = proto::kVersion;
 		header->skyrimPid = ::GetCurrentProcessId();
@@ -360,6 +361,65 @@ namespace skycraft
 		return true;
 	}
 
+	void Link::WriteSkyrimShots(const proto::SkyrimShot* a_shots, std::uint32_t a_count)
+	{
+		if (!base_) {
+			return;
+		}
+		auto*      table = At<proto::SkyrimShots>(proto::kOffSkyrimShots);
+		auto       seq = Atomic(table->seq);
+		const auto s = seq.load(std::memory_order_relaxed);
+		seq.store(s + 1, std::memory_order_relaxed);
+		std::atomic_thread_fence(std::memory_order_release);
+		const auto count = std::min(a_count, proto::kMaxSkyrimShots);
+		table->count = count;
+		if (count) {
+			std::memcpy(table->shots, a_shots, sizeof(proto::SkyrimShot) * count);
+		}
+		seq.store(s + 2, std::memory_order_release);
+	}
+
+	void Link::WriteSkyInventory(const proto::SkyItem* a_items, std::uint32_t a_count, std::uint32_t a_generation, std::int32_t a_gold, float a_carried, float a_carryMax)
+	{
+		if (!base_) {
+			return;
+		}
+		auto*      table = At<proto::SkyInventory>(proto::kOffSkyInventory);
+		auto       seq = Atomic(table->seq);
+		const auto s = seq.load(std::memory_order_relaxed);
+		seq.store(s + 1, std::memory_order_relaxed);
+		std::atomic_thread_fence(std::memory_order_release);
+		const auto count = std::min(a_count, proto::kMaxSkyItems);
+		table->count = count;
+		table->gold = a_gold;
+		table->carried = a_carried;
+		table->carryMax = a_carryMax;
+		if (count) {
+			std::memcpy(table->items, a_items, sizeof(proto::SkyItem) * count);
+		}
+		Atomic(table->generation).store(a_generation, std::memory_order_relaxed);
+		seq.store(s + 2, std::memory_order_release);
+	}
+
+	void Link::WriteSkyIcon(std::uint32_t a_slot, std::uint32_t a_key, const std::uint8_t* a_rgba)
+	{
+		if (!base_ || a_slot >= proto::kMaxSkyIcons) {
+			return;
+		}
+		auto*      icons = At<proto::SkyIcons>(proto::kOffSkyIcons);
+		auto&      slot = icons->slots[a_slot];
+		auto       seq = Atomic(slot.seq);
+		const auto s = seq.load(std::memory_order_relaxed);
+		seq.store(s + 1, std::memory_order_relaxed);
+		std::atomic_thread_fence(std::memory_order_release);
+		slot.key = a_key;
+		if (a_rgba) {
+			std::memcpy(slot.rgba, a_rgba, sizeof(slot.rgba));
+		}
+		seq.store(s + 2, std::memory_order_release);
+		Atomic(icons->generation).fetch_add(1, std::memory_order_release);
+	}
+
 	void Link::WriteActors(const proto::ActorRecord* a_records, std::uint32_t a_count)
 	{
 		if (!base_) {
@@ -396,6 +456,45 @@ namespace skycraft
 		}
 		a_out = reinterpret_cast<const proto::McEvent*>(ring + proto::kEventRingDataOff)[tail & (proto::kEventRingEntries - 1)];
 		Atomic(tailRef).store(tail + 1, std::memory_order_release);
+		return true;
+	}
+
+	bool Link::PopStoreRequest(proto::SkyStoreRequest& a_out)
+	{
+		if (!base_) {
+			return false;
+		}
+		auto*      store = base_ + proto::kOffSkyStore;
+		auto&      headRef = *reinterpret_cast<std::uint64_t*>(store + proto::kStoreReqHeadOff);
+		auto&      tailRef = *reinterpret_cast<std::uint64_t*>(store + proto::kStoreReqTailOff);
+		const auto head = Atomic(headRef).load(std::memory_order_acquire);
+		auto       tail = Atomic(tailRef).load(std::memory_order_relaxed);
+		if (tail >= head) {
+			return false;
+		}
+		if (head - tail > proto::kStoreRequests) {
+			tail = head - proto::kStoreRequests;
+		}
+		a_out = reinterpret_cast<const proto::SkyStoreRequest*>(store + proto::kStoreReqDataOff)[tail & (proto::kStoreRequests - 1)];
+		Atomic(tailRef).store(tail + 1, std::memory_order_release);
+		return true;
+	}
+
+	bool Link::PushStoreResult(const proto::SkyStoreResult& a_result)
+	{
+		if (!base_) {
+			return false;
+		}
+		auto*      store = base_ + proto::kOffSkyStore;
+		auto&      headRef = *reinterpret_cast<std::uint64_t*>(store + proto::kStoreResHeadOff);
+		auto&      tailRef = *reinterpret_cast<std::uint64_t*>(store + proto::kStoreResTailOff);
+		const auto head = Atomic(headRef).load(std::memory_order_relaxed);
+		const auto tail = Atomic(tailRef).load(std::memory_order_acquire);
+		if (head - tail >= proto::kStoreResults) {
+			return false;
+		}
+		reinterpret_cast<proto::SkyStoreResult*>(store + proto::kStoreResDataOff)[head & (proto::kStoreResults - 1)] = a_result;
+		Atomic(headRef).store(head + 1, std::memory_order_release);
 		return true;
 	}
 
