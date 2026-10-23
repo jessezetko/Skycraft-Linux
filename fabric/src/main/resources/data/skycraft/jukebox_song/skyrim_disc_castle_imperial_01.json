@@ -1,0 +1,10 @@
+{
+  "comparator_output": 13,
+  "description": {
+    "translate": "jukebox_song.skycraft.castle_imperial_01"
+  },
+  "length_in_seconds": 139.0,
+  "sound_event": {
+    "sound_id": "skycraft:music_disc.castle_imperial_01"
+  }
+}

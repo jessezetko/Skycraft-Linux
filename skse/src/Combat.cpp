@@ -1141,6 +1141,8 @@ namespace skycraft
 						Game::SleptInMinecraft();  // SkyCraft+ : beds
 					} else if (ev.type == proto::kEvGoToBed) {
 						Game::GoToBed(a_player, ev);  // SkyCraft+ : beds
+					} else if (ev.type == proto::kEvJukebox) {
+						MusicDiscs::OnJukebox(ev.flags, ev.a, ev.b, ev.c);  // SkyCraft+
 					}
 				}
 				pendingExplosions.clear();
@@ -1202,6 +1204,9 @@ namespace skycraft
 					break;
 				case proto::kEvGoToBed:
 					Game::GoToBed(a_player, ev);  // SkyCraft+ : beds
+					break;
+				case proto::kEvJukebox:
+					MusicDiscs::OnJukebox(ev.flags, ev.a, ev.b, ev.c);  // SkyCraft+ : Skyrim music discs
 					break;
 				case proto::kEvBowEnchants:
 					SkyrimShots::SetBowEnchants(ev.flags);  // SkyCraft+ : enchanting across the games

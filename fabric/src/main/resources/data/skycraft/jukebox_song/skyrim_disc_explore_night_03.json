@@ -1,0 +1,10 @@
+{
+  "comparator_output": 15,
+  "description": {
+    "translate": "jukebox_song.skycraft.explore_night_03"
+  },
+  "length_in_seconds": 365.0,
+  "sound_event": {
+    "sound_id": "skycraft:music_disc.explore_night_03"
+  }
+}

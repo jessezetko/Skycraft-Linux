@@ -511,6 +511,13 @@ namespace skycraft
 		void          ClearPets();
 	}
 
+	// SkyCraft+ : Skyrim music discs played in Minecraft's jukeboxes (kEvJukebox).
+	namespace MusicDiscs
+	{
+		void OnJukebox(std::uint32_t a_disc, float a_x, float a_y, float a_z);
+		void PerFrame();
+	}
+
 	// SkyCraft+ : Skyrim crops on Minecraft farmland.
 	namespace Crops
 	{

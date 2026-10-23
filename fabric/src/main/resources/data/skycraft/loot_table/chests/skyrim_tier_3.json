@@ -386,6 +386,22 @@
         "max": 4,
         "min": 3
       }
+    },
+    {
+      "bonus_rolls": 0.0,
+      "entries": [
+        {
+          "type": "minecraft:tag",
+          "expand": true,
+          "name": "skycraft:skyrim_music_discs",
+          "weight": 1
+        },
+        {
+          "type": "minecraft:empty",
+          "weight": 5
+        }
+      ],
+      "rolls": 1.0
     }
   ],
   "random_sequence": "skycraft:chests/skyrim_tier_3"

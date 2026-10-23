@@ -1,0 +1,10 @@
+{
+  "comparator_output": 13,
+  "description": {
+    "translate": "jukebox_song.skycraft.town_day_02"
+  },
+  "length_in_seconds": 304.0,
+  "sound_event": {
+    "sound_id": "skycraft:music_disc.town_day_02"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "comparator_output": 8,
+  "description": {
+    "translate": "jukebox_song.skycraft.special_cartintro_01"
+  },
+  "length_in_seconds": 89.0,
+  "sound_event": {
+    "sound_id": "skycraft:music_disc.special_cartintro_01"
+  }
+}

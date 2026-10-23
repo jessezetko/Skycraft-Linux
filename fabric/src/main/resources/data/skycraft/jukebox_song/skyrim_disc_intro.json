@@ -1,0 +1,10 @@
+{
+  "comparator_output": 10,
+  "description": {
+    "translate": "jukebox_song.skycraft.intro"
+  },
+  "length_in_seconds": 67.0,
+  "sound_event": {
+    "sound_id": "skycraft:music_disc.intro"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "comparator_output": 9,
+  "description": {
+    "translate": "jukebox_song.skycraft.explore_dlc2solstheim_09"
+  },
+  "length_in_seconds": 426.0,
+  "sound_event": {
+    "sound_id": "skycraft:music_disc.explore_dlc2solstheim_09"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "comparator_output": 2,
+  "description": {
+    "translate": "jukebox_song.skycraft.combat_06"
+  },
+  "length_in_seconds": 178.0,
+  "sound_event": {
+    "sound_id": "skycraft:music_disc.combat_06"
+  }
+}

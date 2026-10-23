@@ -1,0 +1,10 @@
+{
+  "comparator_output": 1,
+  "description": {
+    "translate": "jukebox_song.skycraft.cc_dungeon_03"
+  },
+  "length_in_seconds": 65.0,
+  "sound_event": {
+    "sound_id": "skycraft:music_disc.cc_dungeon_03"
+  }
+}

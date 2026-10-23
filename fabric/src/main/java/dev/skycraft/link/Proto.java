@@ -8,7 +8,7 @@ public final class Proto {
 	}
 
 	public static final int MAGIC = 0x43594B53;
-	public static final int VERSION = 61; // SkyCraft+ : v50, KotIsOff's atlas in bands (kRenAtlasChunk); v51, Skyrim mode's collision and lock-on (kWeMob, kSkySkyrimControl); v52, SKY_ACT_DESTROY; v53, taming and feeding (EV_TAME, EV_GROW_BABY, ACTOR_TAMED); v54, Minecraft's things at Skyrim's workbenches (SS_WORKBENCH, STORE_LEND_GEAR/RETURN_GEAR, EV_ENCHANT_HIT); v55, arrows across the games (SHOT_ARROW), Skyrim mode's Activate (MS_USE_DISTANCE); v56, the settings screen (OFF_SKY_SETTINGS); v57, every shout in Minecraft mode (SHOT_PARALYZE.., SS_SELF_EFFECTS); v58, Skyrim geo (REN_SKYRIM_TEXTURE, STORE_TEXTURE_AT, SKY_GEO); v59, beds (EV_SLEPT, EV_GO_TO_BED), bow enchantments (EV_BOW_ENCHANTS); v60, Minecraft arrows on the Skyrim bow (EV_BOW_ENCHANTS flag 4); v61, SHOT_LENT, Skyrim arrows from a Minecraft bow (WE_SKYRIM_ARROW), Skyrim blocks' item pictures (STORE_TEXTURE_PICTURE)
+	public static final int VERSION = 62; // SkyCraft+ : v50, KotIsOff's atlas in bands (kRenAtlasChunk); v51, Skyrim mode's collision and lock-on (kWeMob, kSkySkyrimControl); v52, SKY_ACT_DESTROY; v53, taming and feeding (EV_TAME, EV_GROW_BABY, ACTOR_TAMED); v54, Minecraft's things at Skyrim's workbenches (SS_WORKBENCH, STORE_LEND_GEAR/RETURN_GEAR, EV_ENCHANT_HIT); v55, arrows across the games (SHOT_ARROW), Skyrim mode's Activate (MS_USE_DISTANCE); v56, the settings screen (OFF_SKY_SETTINGS); v57, every shout in Minecraft mode (SHOT_PARALYZE.., SS_SELF_EFFECTS); v58, Skyrim geo (REN_SKYRIM_TEXTURE, STORE_TEXTURE_AT, SKY_GEO); v59, beds (EV_SLEPT, EV_GO_TO_BED), bow enchantments (EV_BOW_ENCHANTS); v60, Minecraft arrows on the Skyrim bow (EV_BOW_ENCHANTS flag 4); v61, SHOT_LENT, Skyrim arrows from a Minecraft bow (WE_SKYRIM_ARROW), Skyrim blocks' item pictures (STORE_TEXTURE_PICTURE); v62, Skyrim music discs (EV_JUKEBOX), Skyrim's workbenches taken and placed (DIG_WORKBENCH, STORE_TAKE_WORKBENCH, EV_PLACE_WORKBENCH), the Overworld Portal's world (DIM_OVERWORLD)
 	// A second client on the same PC (multiplayer testing) talks to its own stand-in Skyrim:
 	// -Dskycraft.link=Local\SkyCraft_guest (see tools/fake_guest.py).
 	public static final String MAPPING_NAME = System.getProperty("skycraft.link", "Local\\SkyCraft_v1");
@@ -78,6 +78,7 @@ public final class Proto {
 	public static final int STORE_TAKE = 1, STORE_GIVE = 2, STORE_PICTURE = 3;
 	public static final int STORE_LEND_GEAR = 4, STORE_RETURN_GEAR = 5; // SkyCraft+ : v54, a Minecraft weapon or armor at Skyrim's enchanter
 	public static final int STORE_TEXTURE_AT = 6; // SkyCraft+ : v58, the texture of Skyrim's geometry at a point (name: its path; kind 1 land, 2 an object)
+	public static final int STORE_TAKE_WORKBENCH = 8; // SkyCraft+ : v62, take the Skyrim workbench nearest a point (health/charge/soul bits: x, y, z): formId the furniture, kind its bench type, name its name
 	public static final int STORE_TEXTURE_PICTURE = 7; // SkyCraft+ : v61, draw this texture's picture too for a while (plugin: its path; health: the blocks it spreads over, the picture one's part; the result's formId is its key)
 	public static final int GEAR_SWORD = 1, GEAR_AXE = 2, GEAR_MACE = 3, GEAR_PICKAXE = 4, GEAR_BOW = 5, GEAR_CROSSBOW = 6, GEAR_HELMET = 7, GEAR_CHEST = 8,
 		GEAR_LEGS = 9, GEAR_BOOTS = 10, GEAR_SHIELD = 11;
@@ -163,6 +164,8 @@ public final class Proto {
 	public static final int EV_ENCHANT_HIT = 18; // SkyCraft+ : v54, a Minecraft weapon's Skyrim enchantment (flags: its form id) on formId
 	public static final int EV_SLEPT = 19; // SkyCraft+ : v59, slept the night through in a bed: Skyrim's clock goes to 6 am
 	public static final int EV_GO_TO_BED = 20; // SkyCraft+ : v59, after a death and reload: formId = worldId the bed was slept in, flags = dimension, a/b/c where to stand, d yaw
+	public static final int EV_JUKEBOX = 22; // SkyCraft+ : v62, a jukebox at a/b/c plays a Skyrim music disc: flags its index + 1 in SkyMusicDiscs.DISCS, 0 stopped
+	public static final int EV_PLACE_WORKBENCH = 23; // SkyCraft+ : v62, a Skyrim workbench placed: formId the furniture, a/b/c its foot, d its facing (MC degrees)
 	public static final int EV_BOW_ENCHANTS = 21; // SkyCraft+ : v59, Minecraft enchantments on the Skyrim bow in hand: flags 1 Infinity, 2 Multishot; v60, 4 its arrows stand in for Minecraft arrows
 	public static final int EV_DRAGON_SOUL = 8; // SkyCraft+ : v39, the Ender Dragon died near this player: a Skyrim dragon soul
 	public static final int SKY_ACT_RIGHT = 1, SKY_ACT_LEFT = 2, SKY_ACT_USE = 3, SKY_ACT_MENU_STATS = 4, SKY_ACT_MENU_MAP = 5,
@@ -345,6 +348,7 @@ public final class Proto {
 	public static final int DIM_NETHER = 3;
 	public static final int DIM_END = 4;
 	public static final int DIM_OTHER = 5;
+	public static final int DIM_OVERWORLD = 6; // SkyCraft+ : v62, Minecraft's own overworld (the Overworld Portal's)
 
 	// Overlay
 	public static final long OC_STATE = 0x00;
@@ -389,7 +393,7 @@ public final class Proto {
 		DIG_ORGANIC = 16, DIG_CLOTH = 17, DIG_BONE = 18, DIG_WEB = 19, DIG_ASH = 20, DIG_BEDROCK = 21, DIG_HAY = 22 /* SkyCraft+ : v43 */,
 		// SkyCraft+ : v44, Skyrim things that break into their Minecraft counterpart
 		DIG_BARREL = 23, DIG_CHEST = 24, DIG_BOOKSHELF = 25, DIG_IRON_BARS = 26, DIG_CHAIN = 27, DIG_CANDLE = 28, DIG_LANTERN = 29, DIG_CAMPFIRE = 30,
-		DIG_CARPET = 31, DIG_BED = 32, DIG_MUSHROOM = 33, DIG_ORE_VEIN = 34, DIG_MATERIAL_COUNT = 35;
+		DIG_CARPET = 31, DIG_BED = 32, DIG_MUSHROOM = 33, DIG_ORE_VEIN = 34, DIG_WORKBENCH = 35 /* SkyCraft+ : v62 */, DIG_MATERIAL_COUNT = 36;
 	public static final int COL_REGION_HEADER_BYTES = 32;
 	public static final int COL_BLOCK_BYTES = 80;
 }

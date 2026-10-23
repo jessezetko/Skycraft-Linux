@@ -175,6 +175,7 @@ public final class SkySettingsScreen extends Screen {
 		{ "Items & combat", "crossCrafting", "true", "Skyrim materials count in Minecraft's recipes (Skyrim iron makes a Minecraft sword)." },
 		{ "Items & combat", "skyrimWorkbenches", "true", "Skyrim's forge, cooking pot, enchanter... see your Minecraft materials (and the weapon in hand) while you use them." },
 		{ "Items & combat", "enchanterAllGear", "true", "At Skyrim's enchanter, every Minecraft weapon and piece of armor in your inventory can be enchanted (worn armor stays on). Off: only what's in your hand." },
+		{ "Items & combat", "skyrimMusicDiscs", "true", "A jukebox playing a Skyrim music disc plays that Skyrim song (found in Skyrim's dungeon chests, or dropped by a creeper a skeleton shot)." },
 		{ "Items & combat", "arrowsAcrossGames", "true", "Minecraft bows shoot Skyrim arrows and Skyrim bows Minecraft arrows (the off hand's arrows win)." },
 		{ "Items & combat", "skyrimWeaponsBreakBlocks", "true", "Skyrim weapons break Minecraft blocks (pickaxes and wood axes as tools)." },
 		{ "Items & combat", "skyrimFightsMobs", "true", "Your followers fight Minecraft's monsters; anyone a mob hurts hits back." },

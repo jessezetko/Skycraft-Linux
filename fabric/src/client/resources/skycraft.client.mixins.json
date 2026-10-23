@@ -23,6 +23,7 @@
     "MinecraftMixin",
     "MinecraftPauseMixin",
     "MinecraftGlowOutlineMixin",
+    "LevelEventHandlerJukeboxMixin",
     "MinecraftUseMixin",
     "MinecraftShortcutUseMixin",
     "GuiGraphicsShortcutMixin",

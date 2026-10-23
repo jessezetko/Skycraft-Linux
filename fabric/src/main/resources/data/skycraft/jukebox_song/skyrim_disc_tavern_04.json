@@ -1,0 +1,10 @@
+{
+  "comparator_output": 7,
+  "description": {
+    "translate": "jukebox_song.skycraft.tavern_04"
+  },
+  "length_in_seconds": 193.0,
+  "sound_event": {
+    "sound_id": "skycraft:music_disc.tavern_04"
+  }
+}

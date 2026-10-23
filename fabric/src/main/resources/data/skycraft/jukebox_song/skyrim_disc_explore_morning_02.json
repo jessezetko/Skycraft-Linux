@@ -1,0 +1,10 @@
+{
+  "comparator_output": 8,
+  "description": {
+    "translate": "jukebox_song.skycraft.explore_morning_02"
+  },
+  "length_in_seconds": 233.0,
+  "sound_event": {
+    "sound_id": "skycraft:music_disc.explore_morning_02"
+  }
+}

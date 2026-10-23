@@ -13,7 +13,7 @@
 namespace skycraft::proto
 {
 	inline constexpr std::uint32_t kMagic = 0x43594B53;  // "SKYC"
-	inline constexpr std::uint32_t kVersion = 61;  // SkyCraft+ : v50, KotIsOff's atlas in bands (kRenAtlasChunk); v51, Skyrim mode's collision and lock-on (kWeMob, kSkySkyrimControl); v52, kSkyItemDestroy; v53, taming and feeding (kEvTame, kEvGrowBaby, kActorTamed); v54, Minecraft's things at Skyrim's workbenches (SkyState::workbench, kStoreLendGear/kStoreReturnGear, kEvEnchantHit); v55, arrows across the games (kShotArrow), Skyrim mode's Activate (McState::useDistance); v56, the SkyCraft+ settings screen (SkySettingsText, SettingsEdit); v57, every shout in Minecraft mode (kShotParalyze..kShotWither, SkyrimShot::seconds, SkyState::selfEffects); v58, Skyrim geo (kRenSkyrimTexture, kStoreTextureAt, kSkyGeo); v59, beds (kEvSlept, kEvGoToBed), bow enchantments (kEvBowEnchants); v60, Minecraft arrows on the Skyrim bow (kEvBowEnchants flag 4); v61, kShotLent, Skyrim arrows from a Minecraft bow (kWeSkyrimArrow), Skyrim blocks' item pictures (kStoreTexturePicture)
+	inline constexpr std::uint32_t kVersion = 62;  // SkyCraft+ : v50, KotIsOff's atlas in bands (kRenAtlasChunk); v51, Skyrim mode's collision and lock-on (kWeMob, kSkySkyrimControl); v52, kSkyItemDestroy; v53, taming and feeding (kEvTame, kEvGrowBaby, kActorTamed); v54, Minecraft's things at Skyrim's workbenches (SkyState::workbench, kStoreLendGear/kStoreReturnGear, kEvEnchantHit); v55, arrows across the games (kShotArrow), Skyrim mode's Activate (McState::useDistance); v56, the SkyCraft+ settings screen (SkySettingsText, SettingsEdit); v57, every shout in Minecraft mode (kShotParalyze..kShotWither, SkyrimShot::seconds, SkyState::selfEffects); v58, Skyrim geo (kRenSkyrimTexture, kStoreTextureAt, kSkyGeo); v59, beds (kEvSlept, kEvGoToBed), bow enchantments (kEvBowEnchants); v60, Minecraft arrows on the Skyrim bow (kEvBowEnchants flag 4); v61, kShotLent, Skyrim arrows from a Minecraft bow (kWeSkyrimArrow), Skyrim blocks' item pictures (kStoreTexturePicture); v62, Skyrim music discs (kEvJukebox), Skyrim's workbenches taken and placed (kDigWorkbench, kStoreTakeWorkbench, kEvPlaceWorkbench), the Overworld Portal's world (kDimOverworld)
 	inline constexpr wchar_t       kMappingName[] = L"Local\\SkyCraft_v1";
 
 	// 1 Minecraft block == 70 Skyrim units (Skyrim player ~128 units tall, MC player 1.8 blocks).
@@ -230,6 +230,7 @@ namespace skycraft::proto
 		kDimNether = 3,
 		kDimEnd = 4,
 		kDimOther = 5,       // any other Minecraft-only world (a mod's)
+		kDimOverworld = 6,   // SkyCraft+ (v62): Minecraft's own overworld (the Overworld Portal's): daylight, Skyrim's people and creatures about
 	};
 
 	struct McState
@@ -461,6 +462,10 @@ namespace skycraft::proto
 		kEvBowEnchants = 21, // SkyCraft+ (v59): Minecraft enchantments on the Skyrim bow in hand, which Skyrim acts out:
 		                     // flags 1 Infinity (each arrow shot comes back), 2 Multishot (two more arrows fly beside it),
 		                     // 4 (v60) its arrows stand in for Minecraft arrows (gone once they hit, never picked up)
+		kEvJukebox = 22,     // SkyCraft+ (v62): a jukebox at a/b/c (MC coords, the block's centre) plays a Skyrim music disc:
+		                     // flags its index + 1 in MusicDiscs (SkyMusicDiscs.DISCS on Minecraft's side), 0 it stopped
+		kEvPlaceWorkbench = 23,  // SkyCraft+ (v62): a Skyrim workbench item placed: formId (the furniture) stands at a/b/c (MC
+		                         // coords, its foot), facing d (MC degrees), kept in the save
 	};
 
 	// SkyCraft+ : what a click on a Skyrim item does (McEvent::flags of kEvSkyItem).
@@ -753,6 +758,7 @@ namespace skycraft::proto
 		kDigBed = 32,         // bedrolls
 		kDigMushroom = 33,
 		kDigOreVein = 34,     // a Skyrim ore vein: mined with a pickaxe, its ore goes into Skyrim's inventory (kEvMinedOre)
+		kDigWorkbench = 35,   // SkyCraft+ (v62): a Skyrim workbench (forge, enchanter...): mined with a pickaxe it's taken whole (kStoreTakeWorkbench)
 		kDigMaterialCount
 	};
 
@@ -1145,6 +1151,9 @@ namespace skycraft::proto
 		                       // as "kind magnitude seconds;..."), else kStoreNone
 		kStoreTexturePicture = 7,  // SkyCraft+ (v61): draw the picture of the texture whose path is in plugin too for a while (health: the blocks it spreads over; the picture is one block's part)
 		                           // (a Skyrim block's item: SkyIcons; the result's formId is its key)
+		kStoreTakeWorkbench = 8,   // SkyCraft+ (v62): take the Skyrim workbench nearest the point in health/charge/bits of soul (MC
+		                           // x, y, z): it's gone from Skyrim's world; kStoreOk, formId the furniture, kind its bench type,
+		                           // name its name; kStoreNone: none there
 	};
 
 	// SkyCraft+ (v54): what a Minecraft thing at Skyrim's enchanter stands as (SkyStoreRequest::soul of kStoreLendGear).

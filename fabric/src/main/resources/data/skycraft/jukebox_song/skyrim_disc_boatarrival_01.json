@@ -1,0 +1,10 @@
+{
+  "comparator_output": 1,
+  "description": {
+    "translate": "jukebox_song.skycraft.boatarrival_01"
+  },
+  "length_in_seconds": 55.0,
+  "sound_event": {
+    "sound_id": "skycraft:music_disc.boatarrival_01"
+  }
+}
