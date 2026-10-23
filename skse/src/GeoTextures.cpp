@@ -261,5 +261,26 @@ namespace skycraft::GeoTextures
 			std::strncpy(item.name, path, sizeof(item.name) - 1);
 			a_items.push_back(item);
 		}
+		// SkyCraft+ : and the textures Skyrim's buildings and dungeons are made of (its texture sets under Architecture and
+		// Dungeons, not decals): Whiterun's timber, Windhelm's and Solitude's stone, Nordic ruins, Dwemer metal...
+		for (auto* set : handler->GetFormArray<RE::BGSTextureSet>()) {
+			const char* path = set && !set->decalData ? set->GetTexturePath(RE::BSTextureSet::Texture::kDiffuse) : nullptr;
+			const std::string lower = path ? Lower(path) : std::string();
+			if (lower.empty() || (lower.find("architecture\\") == std::string::npos && lower.find("dungeons\\") == std::string::npos) ||
+				lower.find("decal") != std::string::npos || lower.find("trim") != std::string::npos || !seen.insert(lower).second ||
+				a_items.size() >= proto::kMaxCatalog) {
+				continue;
+			}
+			using M = RE::MATERIAL_ID;
+			const bool wood = lower.find("wood") != std::string::npos || lower.find("plank") != std::string::npos || lower.find("thatch") != std::string::npos;
+			const bool metal = lower.find("dwemer") != std::string::npos || lower.find("metal") != std::string::npos || lower.find("iron") != std::string::npos;
+			proto::SkyItem item{};
+			item.formId = set->GetFormID();
+			item.kind = proto::kSkyGeo;
+			item.count = 1;
+			item.material = Dig::MaterialFor(wood ? M::kWood : metal ? M::kMetalSolid : M::kStone, nullptr, false);
+			std::strncpy(item.name, path, sizeof(item.name) - 1);
+			a_items.push_back(item);
+		}
 	}
 }
