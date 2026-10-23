@@ -377,18 +377,48 @@ public final class WorldExporter {
 		// broken stayed as it was in Skyrim (only its collision changed).
 		long deadline = System.nanoTime() + 3_000_000L;
 		int meshed = 0;
+		long now = System.nanoTime();
 		for (int i = 0; i < order.length && meshed < SECTIONS_PER_FRAME && System.nanoTime() < deadline; i++) {
 			long key = order[i];
 			synchronized (DIRTY) {
+				// SkyCraft+ : structure loading. A section meshed moments ago waits a little before it's
+				// meshed again (a structure being placed, its ground laid and dug, dirtied the same
+				// sections tick after tick: each was meshed over and over, a frame's hitch each time).
+				// What the player just changed never waits.
+				if (!URGENT.contains(key) && now - MESHED_AT.getOrDefault(key, Long.MIN_VALUE / 2) < REMESH_AFTER_NANOS) {
+					continue;
+				}
 				if (!DIRTY.remove(key)) {
 					continue;
 				}
 				URGENT.remove(key);
 			}
+			long started = System.nanoTime();
 			if (meshSection(level, key)) {
 				meshedTotal++;
 				meshed++;
+				MESHED_AT.put(key, started);
 			}
+			noteSlowSection(key, System.nanoTime() - started);
+		}
+		if (MESHED_AT.size() > 8192) {
+			MESHED_AT.long2LongEntrySet().removeIf(e -> now - e.getLongValue() > REMESH_AFTER_NANOS);
+		}
+	}
+
+	/** SkyCraft+ : structure loading. When each section was last meshed (see meshDirtySections). */
+	private static final it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap MESHED_AT = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
+	private static final long REMESH_AFTER_NANOS = 400_000_000L;
+	/** SkyCraft+ : performance. Where a slow section's time went (the parts meshSection counts). */
+	private static long partColumns, partBlocks, partWalls, partSend;
+	private static int slowSections;
+
+	private static void noteSlowSection(long key, long nanos) {
+		if (nanos > 25_000_000L && slowSections < 60) {
+			slowSections++;
+			SkyCraft.LOG.info("SkyCraft: slow section {} {} {}: {} ms (Skyrim's ground round it {} ms, its blocks {} ms, dug walls {} ms, sending {} ms)",
+				SectionPos.x(key), SectionPos.y(key), SectionPos.z(key), nanos / 1_000_000L, partColumns / 1_000_000L, partBlocks / 1_000_000L,
+				partWalls / 1_000_000L, partSend / 1_000_000L);
 		}
 	}
 
@@ -593,6 +623,8 @@ public final class WorldExporter {
 		MESH.cardinal = level.cardinalLighting();
 		List<BlockPos> openPos = null;
 		List<BlockState> openState = null;
+		long p0 = System.nanoTime();
+		partColumns = partBlocks = partWalls = partSend = 0L;
 		boolean underground = level.dimension() == net.minecraft.world.level.Level.OVERWORLD && dev.skycraft.world.SkyUnderground.enabled();
 		for (int c = 0; c < 324; c++) {
 			int cx = c % 18 - 1, cz = c / 18 - 1;
@@ -604,6 +636,8 @@ public final class WorldExporter {
 		}
 		MESH.rockDug = underground ? dev.skycraft.world.SkyDig.clientDug : null;
 		MESH.rockOrigin = SectionPos.of(sx, sy, sz).origin();
+		long p1 = System.nanoTime();
+		partColumns = p1 - p0;
 		if (!empty) {
 			BlockPos origin = SectionPos.of(sx, sy, sz).origin();
 			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
@@ -695,12 +729,16 @@ public final class WorldExporter {
 		} else {
 			OPENABLES.remove(key);
 		}
+		long p2 = System.nanoTime();
+		partBlocks = p2 - p1;
 		// Holes dug into Skyrim's ground: Minecraft walls where its surface still runs above them.
 		var digLookup = dev.skycraft.world.SkyDig.clientDug;
 		if (dugCount > 0 && digLookup != null) {
 			Minecraft minecraft = Minecraft.getInstance();
 			DigWalls.add(level, sx, sy, sz, dug, digLookup, st -> cubeFaces(minecraft, st), MESH::wall);
 		}
+		long p3 = System.nanoTime();
+		partWalls = p3 - p2;
 		if (MESH.vertexCount() == 0 && !SENT.contains(key) && lightCount == 0 && !LIT.contains(key) && solidCount == 0 && !SOLID.contains(key) && dugCount == 0
 			&& !DUG.contains(key)) {
 			return true;
@@ -797,6 +835,7 @@ public final class WorldExporter {
 		} else {
 			markDirty(sx, sy, sz); // ring full; try again later
 		}
+		partSend = System.nanoTime() - p3;
 		return true;
 	}
 
