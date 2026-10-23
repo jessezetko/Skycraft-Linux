@@ -2639,8 +2639,11 @@ namespace skycraft
 			if (!st.skyrimMode && !st.mcInWorld) {
 				return;  // nothing to switch from: Skyrim already has the player
 			}
-			if (!st.skyrimMode && (st.parked || st.mcWorld >= proto::kDimNether)) {
-				// SkyCraft+ : the Nether, the End and Minecraft's overworld have nothing of Skyrim's to walk on.
+			// SkyCraft+ : Minecraft's overworld (the Overworld Portal's): Skyrim mode on Minecraft's blocks alone (their collision
+			// is made in the waiting cell as anywhere; [Worlds] bSkyrimModeInOverworld).
+			const bool overworldMode = st.mcWorld == proto::kDimOverworld && st.skyrimModeInOverworld;
+			if (!st.skyrimMode && (st.parked || st.mcWorld >= proto::kDimNether) && !overworldMode) {
+				// SkyCraft+ : the Nether and the End have nothing of Skyrim's to walk on.
 				RE::SendHUDMessage::ShowHUDMessage("SkyCraft: Skyrim mode isn't available in Minecraft's own worlds");
 				return;
 			}
