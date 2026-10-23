@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:smithing_table",
+    "minecraft:leather"
+  ],
+  "result": {
+    "id": "skycraft:skyrim_workbench",
+    "count": 1,
+    "components": {
+      "minecraft:custom_data": {
+        "skycraft_workbench": 889647
+      },
+      "minecraft:item_name": "Workbench",
+      "minecraft:item_model": "minecraft:smithing_table"
+    }
+  }
+}

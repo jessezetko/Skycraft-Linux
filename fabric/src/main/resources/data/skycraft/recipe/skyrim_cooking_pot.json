@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:campfire",
+    "minecraft:cauldron"
+  ],
+  "result": {
+    "id": "skycraft:skyrim_workbench",
+    "count": 1,
+    "components": {
+      "minecraft:custom_data": {
+        "skycraft_workbench": 428763
+      },
+      "minecraft:item_name": "Cooking Pot",
+      "minecraft:item_model": "minecraft:campfire"
+    }
+  }
+}

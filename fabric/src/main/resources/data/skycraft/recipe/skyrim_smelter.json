@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:furnace",
+    "minecraft:raw_iron"
+  ],
+  "result": {
+    "id": "skycraft:skyrim_workbench",
+    "count": 1,
+    "components": {
+      "minecraft:custom_data": {
+        "skycraft_workbench": 640718
+      },
+      "minecraft:item_name": "Smelter",
+      "minecraft:item_model": "minecraft:furnace"
+    }
+  }
+}

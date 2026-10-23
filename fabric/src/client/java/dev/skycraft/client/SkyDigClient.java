@@ -121,6 +121,11 @@ public final class SkyDigClient {
 				.setPower(0.2F).scale(0.6F));
 		}
 		if (progress >= 1.0F) {
+			if (SkyWorkbenchesClient.mined(minecraft, tool, material, hit.x(), hit.y(), hit.z())) {  // SkyCraft+ : a workbench, taken whole
+				mining = null;
+				progress = 0.0F;
+				return true;
+			}
 			if (!SkyGeoClient.mined(minecraft, world(), pos, material)) {  // SkyCraft+ : Skyrim geo (with silk touch: the piece itself)
 				ClientPlayNetworking.send(new SkyNet.DigOpen(world(), pos, material));
 			}

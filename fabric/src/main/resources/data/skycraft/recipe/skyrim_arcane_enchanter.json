@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:enchanting_table",
+    "minecraft:amethyst_shard"
+  ],
+  "result": {
+    "id": "skycraft:skyrim_workbench",
+    "count": 1,
+    "components": {
+      "minecraft:custom_data": {
+        "skycraft_workbench": 765197
+      },
+      "minecraft:item_name": "Arcane Enchanter",
+      "minecraft:item_model": "minecraft:enchanting_table"
+    }
+  }
+}

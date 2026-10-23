@@ -169,6 +169,112 @@ namespace skycraft::Workbench
 		}
 	}
 
+	// SkyCraft+ : Skyrim's workbenches taken whole with a pickaxe and placed again (a Skyrim workbench item
+	// on Minecraft's side). Some are a marker the player uses plus a separate model that's seen.
+	namespace
+	{
+		struct Look
+		{
+			RE::FormID furniture;
+			RE::FormID look;
+		};
+		constexpr Look kLooks[] = {
+			{ 0x000CAE0B, 0x00048748 },  // the forge
+			{ 0x000BF9E1, 0x00048748 },  // Whiterun's forge (Warmaiden's)
+			{ 0x0009C6CE, 0x0001DA0D },  // the smelter
+			{ 0x000727A1, 0x000E2414 },  // the tanning rack
+		};
+
+		bool IsLook(RE::FormID a_base)
+		{
+			return std::ranges::any_of(kLooks, [&](const Look& l) { return l.look == a_base; });
+		}
+
+		RE::TESFurniture* BenchOf(RE::TESObjectREFR* a_ref)
+		{
+			auto* base = a_ref ? a_ref->GetBaseObject() : nullptr;
+			auto* furniture = base ? base->As<RE::TESFurniture>() : nullptr;
+			return furniture && furniture->workBenchData.benchType.get() != RE::TESFurniture::WorkBenchData::BenchType::kNone ? furniture : nullptr;
+		}
+	}
+
+	bool IsWorkbenchPart(RE::TESObjectREFR* a_ref)
+	{
+		auto* base = a_ref ? a_ref->GetBaseObject() : nullptr;
+		return base && (BenchOf(a_ref) || IsLook(base->GetFormID()));
+	}
+
+	RE::FormID Take(RE::PlayerCharacter* a_player, float a_x, float a_y, float a_z, std::string& a_name, int& a_kind)
+	{
+		auto* tes = RE::TES::GetSingleton();
+		if (!tes || !a_player) {
+			return 0;
+		}
+		const RE::NiPoint3 at = McToSky(a_x, a_y, a_z);
+		constexpr float    kReach = 260.0f;  // (a forge's marker stands a way off its model)
+		RE::TESObjectREFR* bench = nullptr;
+		float              best = kReach;
+		std::vector<RE::TESObjectREFR*> looks;
+		tes->ForEachReferenceInRange(a_player, a_player->GetPosition().GetDistance(at) + kReach + 100.0f, [&](RE::TESObjectREFR* ref) {
+			if (!ref || ref->IsDisabled() || ref->IsDeleted()) {
+				return RE::BSContainer::ForEachResult::kContinue;
+			}
+			const float d = ref->GetPosition().GetDistance(at);
+			if (BenchOf(ref) && d < best) {
+				best = d;
+				bench = ref;
+			} else if (auto* base = ref->GetBaseObject(); base && IsLook(base->GetFormID()) && d < kReach * 1.5f) {
+				looks.push_back(ref);
+			}
+			return RE::BSContainer::ForEachResult::kContinue;
+		});
+		if (!bench) {
+			logger::info("workbench: none to take near the point mined");
+			return 0;
+		}
+		auto* furniture = BenchOf(bench);
+		for (auto* look : looks) {
+			auto* lookBase = look->GetBaseObject();
+			const bool ours = std::ranges::any_of(kLooks, [&](const Look& l) { return l.furniture == furniture->GetFormID() && l.look == lookBase->GetFormID(); });
+			if (ours && look->GetPosition().GetDistance(bench->GetPosition()) < kReach) {
+				look->Disable();
+			}
+		}
+		bench->Disable();
+		a_name = furniture->GetName();
+		a_kind = static_cast<int>(furniture->workBenchData.benchType.get());
+		logger::info("workbench: {} ({:08X}) taken whole", a_name, furniture->GetFormID());
+		return furniture->GetFormID();
+	}
+
+	void Place(RE::PlayerCharacter* a_player, RE::FormID a_furniture, float a_x, float a_y, float a_z, float a_yaw)
+	{
+		auto* base = RE::TESForm::LookupByID<RE::TESFurniture>(a_furniture);
+		if (!base || !a_player) {
+			logger::warn("workbench: no furniture {:08X} to place", a_furniture);
+			return;
+		}
+		const RE::NiPoint3 at = McToSky(a_x, a_y, a_z);
+		const RE::NiPoint3 angle{ 0.0f, 0.0f, McYawToHeading(a_yaw + 180.0f) };  // (it faces the player who placed it)
+		auto put = [&](RE::TESBoundObject* a_what) {
+			auto ref = a_player->PlaceObjectAtMe(a_what, true);  // (persists: saved with the game)
+			if (ref) {
+				ref->SetPosition(at);
+				ref->SetAngle(angle);
+			}
+		};
+		put(base);
+		for (const auto& l : kLooks) {
+			if (l.furniture == a_furniture) {
+				if (auto* look = RE::TESForm::LookupByID<RE::TESBoundObject>(l.look)) {
+					put(look);
+				}
+				break;
+			}
+		}
+		logger::info("workbench: {} placed", base->GetName());
+	}
+
 	// Classifies a magic effect the way Minecraft acts it out (SkyEnchanting on the Minecraft side).
 	const char* EffectKind(RE::EffectSetting* a_effect)
 	{

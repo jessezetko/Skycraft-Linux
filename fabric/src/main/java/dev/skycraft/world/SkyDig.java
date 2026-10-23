@@ -485,6 +485,7 @@ public final class SkyDig {
 				net.minecraft.world.level.block.state.properties.BedPart.HEAD);
 			case DIG_MUSHROOM -> Blocks.BROWN_MUSHROOM.defaultBlockState();
 			case DIG_ORE_VEIN -> SkyOreVein.BLOCK.defaultBlockState();
+			case DIG_WORKBENCH -> Blocks.CRAFTING_TABLE.defaultBlockState();  // SkyCraft+ : (taken whole with a pickaxe)
 			default -> Blocks.STONE.defaultBlockState();
 		};
 	}
@@ -833,7 +834,7 @@ public final class SkyDig {
 			case DIG_PLANKS -> depth < 2.5 ? DIG_PLANKS : DIG_STONE;
 			case DIG_METAL -> depth < 1.5 ? DIG_METAL : DIG_STONE;
 			case DIG_GLASS, DIG_ORGANIC, DIG_CLOTH, DIG_BONE, DIG_WEB, DIG_HAY, DIG_BARREL, DIG_CHEST, DIG_BOOKSHELF, DIG_IRON_BARS, DIG_CHAIN, DIG_CANDLE,
-				DIG_LANTERN, DIG_CAMPFIRE, DIG_CARPET, DIG_BED, DIG_MUSHROOM -> depth < 1.0 ? surface : DIG_STONE;
+				DIG_LANTERN, DIG_CAMPFIRE, DIG_CARPET, DIG_BED, DIG_MUSHROOM, DIG_WORKBENCH -> depth < 1.0 ? surface : DIG_STONE;
 			case DIG_ORE_VEIN -> depth < 2.5 ? DIG_ORE_VEIN : DIG_STONE;  // SkyCraft+ : the vein goes in a way
 			default -> DIG_STONE;
 		};

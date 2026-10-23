@@ -542,6 +542,12 @@ namespace skycraft
 		const char*   EffectKind(RE::EffectSetting* a_effect);
 		// A Minecraft weapon with a Skyrim enchantment hit this actor (kEvEnchantHit).
 		void          EnchantHit(RE::PlayerCharacter* a_player, RE::FormID a_target, RE::FormID a_enchantment);
+		// SkyCraft+ (v62): a workbench's furniture or the model seen of one (kDigWorkbench).
+		bool          IsWorkbenchPart(RE::TESObjectREFR* a_ref);
+		// Takes the workbench nearest the point (MC coords) out of Skyrim's world (kStoreTakeWorkbench): its furniture, or 0.
+		RE::FormID    Take(RE::PlayerCharacter* a_player, float a_x, float a_y, float a_z, std::string& a_name, int& a_kind);
+		// A Skyrim workbench item placed (kEvPlaceWorkbench).
+		void          Place(RE::PlayerCharacter* a_player, RE::FormID a_furniture, float a_x, float a_y, float a_z, float a_yaw);
 	}
 
 	// SkyCraft+ : footsteps.

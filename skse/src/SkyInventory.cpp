@@ -1107,6 +1107,16 @@ namespace skycraft::SkyInventory
 					LendGear(a_player, request);  // SkyCraft+
 				} else if (request.op == proto::kStoreReturnGear) {
 					ReturnGear(a_player, request);  // SkyCraft+
+				} else if (request.op == proto::kStoreTakeWorkbench) {
+					// SkyCraft+ : a Skyrim workbench mined with a pickaxe is taken whole (the point in health, charge and soul's bits).
+					std::string name;
+					int         kind = 0;
+					const auto  furniture = Workbench::Take(a_player, request.health, request.charge, std::bit_cast<float>(request.soul), name, kind);
+					proto::SkyStoreResult result = Refusal(request.id, furniture ? proto::kStoreOk : proto::kStoreNone);
+					result.formId = furniture;
+					result.kind = static_cast<std::uint8_t>(kind);
+					std::strncpy(result.name, name.c_str(), sizeof(result.name) - 1);
+					unsent.push_back(result);
 				} else if (request.op == proto::kStoreTextureAt) {
 					// SkyCraft+ : Skyrim geo. Which texture a dug surface has (the point in health, charge and soul's bits).
 					int        kind = 0;

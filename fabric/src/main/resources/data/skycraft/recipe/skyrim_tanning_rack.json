@@ -1,0 +1,23 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:stick",
+    "minecraft:stick",
+    "minecraft:stick",
+    "minecraft:stick",
+    "minecraft:leather",
+    "minecraft:leather"
+  ],
+  "result": {
+    "id": "skycraft:skyrim_workbench",
+    "count": 1,
+    "components": {
+      "minecraft:custom_data": {
+        "skycraft_workbench": 468897
+      },
+      "minecraft:item_name": "Tanning Rack",
+      "minecraft:item_model": "minecraft:loom"
+    }
+  }
+}

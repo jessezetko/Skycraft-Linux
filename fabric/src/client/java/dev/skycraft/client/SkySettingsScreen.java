@@ -176,6 +176,7 @@ public final class SkySettingsScreen extends Screen {
 		{ "Items & combat", "crossCrafting", "true", "Skyrim materials count in Minecraft's recipes (Skyrim iron makes a Minecraft sword)." },
 		{ "Items & combat", "skyrimWorkbenches", "true", "Skyrim's forge, cooking pot, enchanter... see your Minecraft materials (and the weapon in hand) while you use them." },
 		{ "Items & combat", "enchanterAllGear", "true", "At Skyrim's enchanter, every Minecraft weapon and piece of armor in your inventory can be enchanted (worn armor stays on). Off: only what's in your hand." },
+		{ "Items & combat", "skyrimWorkbenchesTaken", "true", "Mining a Skyrim workbench (forge, enchanter, alchemy lab...) with a pickaxe takes it whole, to place again anywhere; they can be crafted too." },
 		{ "Items & combat", "skyrimMusicDiscs", "true", "A jukebox playing a Skyrim music disc plays that Skyrim song (found in Skyrim's dungeon chests, or dropped by a creeper a skeleton shot)." },
 		{ "Items & combat", "arrowsAcrossGames", "true", "Minecraft bows shoot Skyrim arrows and Skyrim bows Minecraft arrows (the off hand's arrows win)." },
 		{ "Items & combat", "minecraftEnchantsOnSkyrim", "true", "Skyrim weapons and armor keep their Minecraft enchantments (worn armor too), take enchanted books at the anvil, and Efficiency speeds up mining with them." },

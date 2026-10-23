@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:brewing_stand",
+    "minecraft:glass_bottle"
+  ],
+  "result": {
+    "id": "skycraft:skyrim_workbench",
+    "count": 1,
+    "components": {
+      "minecraft:custom_data": {
+        "skycraft_workbench": 765196
+      },
+      "minecraft:item_name": "Alchemy Lab",
+      "minecraft:item_model": "minecraft:brewing_stand"
+    }
+  }
+}

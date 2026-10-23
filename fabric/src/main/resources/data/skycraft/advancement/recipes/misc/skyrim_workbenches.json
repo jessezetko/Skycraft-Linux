@@ -1,0 +1,26 @@
+{
+  "parent": "minecraft:recipes/root",
+  "criteria": {
+    "unlock_right_away": {
+      "trigger": "minecraft:tick"
+    }
+  },
+  "requirements": [
+    [
+      "unlock_right_away"
+    ]
+  ],
+  "rewards": {
+    "recipes": [
+      "skycraft:skyrim_blacksmith_forge",
+      "skycraft:skyrim_anvil",
+      "skycraft:skyrim_workbench",
+      "skycraft:skyrim_grindstone",
+      "skycraft:skyrim_smelter",
+      "skycraft:skyrim_tanning_rack",
+      "skycraft:skyrim_cooking_pot",
+      "skycraft:skyrim_arcane_enchanter",
+      "skycraft:skyrim_alchemy_lab"
+    ]
+  }
+}

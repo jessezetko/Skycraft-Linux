@@ -1,4 +1,5 @@
 #include "Dig.h"
+#include "Game.h"  // SkyCraft+ : Workbench::IsWorkbenchPart
 
 #include <bit>
 
@@ -400,6 +401,9 @@ namespace skycraft::Dig
 		// SkyCraft+ : Skyrim things that break into their Minecraft counterpart, by what they are.
 		if (IsOreVein(a_ref)) {
 			return proto::kDigOreVein;
+		}
+		if (Workbench::IsWorkbenchPart(a_ref)) {
+			return proto::kDigWorkbench;  // (taken whole with a pickaxe: kStoreTakeWorkbench)
 		}
 		const bool metal = a_material == M::kMetalLight || a_material == M::kMetalSolid || a_material == M::kMetalHeavy || a_material == M::kChainMetal ||
 		                   a_material == M::kChain;

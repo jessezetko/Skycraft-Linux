@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:grindstone",
+    "minecraft:flint"
+  ],
+  "result": {
+    "id": "skycraft:skyrim_workbench",
+    "count": 1,
+    "components": {
+      "minecraft:custom_data": {
+        "skycraft_workbench": 453058
+      },
+      "minecraft:item_name": "Grindstone",
+      "minecraft:item_model": "minecraft:grindstone"
+    }
+  }
+}

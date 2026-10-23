@@ -26,6 +26,7 @@ public final class SkyCraftClient implements ClientModInitializer {
 		SkyCraftingClient.register(); // SkyCraft+ : crafting across the games
 		SkyLendingClient.register(); // SkyCraft+ : Minecraft's things at Skyrim's workbenches
 		SkyRestoreClient.register(); // SkyCraft+ : the restoration brush
+		SkyWorkbenchesClient.init(); // SkyCraft+ : Skyrim's workbenches taken and placed
 		SkySettingsScreen.register(); // SkyCraft+ : the SkyCraft+ settings screen
 		SkyArrowsClient.register(); // SkyCraft+ : arrows across the games
 		SkyBedsClient.register(); // SkyCraft+ : beds

@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:blast_furnace",
+    "minecraft:iron_ingot",
+    "minecraft:coal"
+  ],
+  "result": {
+    "id": "skycraft:skyrim_workbench",
+    "count": 1,
+    "components": {
+      "minecraft:custom_data": {
+        "skycraft_workbench": 830987
+      },
+      "minecraft:item_name": "Blacksmith Forge",
+      "minecraft:item_model": "minecraft:blast_furnace"
+    }
+  }
+}

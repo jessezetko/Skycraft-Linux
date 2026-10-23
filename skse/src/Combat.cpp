@@ -1205,6 +1205,9 @@ namespace skycraft
 				case proto::kEvGoToBed:
 					Game::GoToBed(a_player, ev);  // SkyCraft+ : beds
 					break;
+				case proto::kEvPlaceWorkbench:
+					Workbench::Place(a_player, ev.formId, ev.a, ev.b, ev.c, ev.d);  // SkyCraft+
+					break;
 				case proto::kEvJukebox:
 					MusicDiscs::OnJukebox(ev.flags, ev.a, ev.b, ev.c);  // SkyCraft+ : Skyrim music discs
 					break;
