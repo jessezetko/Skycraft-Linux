@@ -155,6 +155,7 @@ public final class SkySettingsScreen extends Screen {
 		{ "Spawning", "caveMonsterCap", "6", "The most monsters in caves around you." },
 		{ "Spawning", "caveMonsterSpawnRate", "100", "How fast monsters come in caves you've dug, in percent (100: a try every second; 50: half as fast; 200: twice)." },
 		{ "World", "skyrimStructures", "true", "Minecraft's villages, temples, outposts and the rest in Skyrim's world. Off: they're put away as they are (loot taken stays taken) and come back as they were when on again." },
+		{ "World", "structureBuildBudgetMs", "6", "Milliseconds a game tick spends building a structure that's coming in (1 to 30). Lower: smoother while it loads, but it takes longer to appear; higher: the other way round." },
 		{ "World", "structuresOffMountains", "true", "Structures keep off steep mountainsides (fewer villages, none on a slope)." },
 		{ "World", "deepUnderground", "true", "Real Minecraft underground beneath Skyrim (caves, ores, mineshafts, strongholds). Taken up when the world next loads." },
 		{ "World", "caveRevealRadius", "48", "How far around you (blocks) caves open up as you dig." },

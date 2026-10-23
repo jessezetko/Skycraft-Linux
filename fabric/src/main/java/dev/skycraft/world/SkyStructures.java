@@ -115,7 +115,17 @@ public final class SkyStructures {
 
 	private static @Nullable Pending pending;
 	private static int pendingNext;
-	private static final long PLACE_NANOS = 15_000_000L;  // a tick's share of placing
+	/** SkyCraft+ : structure loading. The next band (16 blocks high) of the chunk being placed: a jigsaw structure's chunk goes a band at a time. */
+	private static int pendingBand;
+	private static final int BAND = 16;
+
+	/**
+	 * A tick's share of placing (SkyCraft+ : structure loading: was 15 ms, a third of a tick, and the
+	 * game hitched as a village went in; setting structureBuildBudgetMs, 1 to 30).
+	 */
+	private static long placeNanos() {
+		return Math.max(1, Math.min(30, dev.skycraft.SkySettings.number("structureBuildBudgetMs", 6))) * 1_000_000L;
+	}
 
 	private SkyStructures() {
 	}
@@ -179,6 +189,7 @@ public final class SkyStructures {
 		INSIDE.clear();  // (another world's)
 		pending = null;
 		pendingNext = 0;
+		pendingBand = 0;
 		padColumns = null;
 		WRITTEN.clear();
 		BOTTOMS.clear();
@@ -462,6 +473,10 @@ public final class SkyStructures {
 				level.getChunkSource().randomState().createClimateSampler(net.minecraft.world.level.levelgen.densityfunction.SamplerContext.EMPTY_UNCACHED),
 				level.getChunkSource().randomState(), level.getStructureTemplateManager(), level.getSeed() ^ site.name().hashCode(), ChunkPos.containing(at), 0, level,
 				b -> true);
+			long laidOut = (System.nanoTime() - t0) / 1_000_000L;
+			if (laidOut > 40) {
+				SkyCraft.LOG.info("SkyCraft: {} ({}) laid out in {} ms", site.name(), site.structure(), laidOut);  // (SkyCraft+ : structure loading: which part hitches)
+			}
 			if (!start.isValid()) {
 				SkyCraft.LOG.warn("SkyCraft: {} ({}) couldn't be laid out at {}", site.name(), site.structure(), at.toShortString());
 				BUILT.put(site.name(), new Built(site.structure(), BoundingBox.fromCorners(at, at)));
@@ -705,7 +720,13 @@ public final class SkyStructures {
 	/** Places the pending structure's next chunks, as many as PLACE_NANOS allows; done: it's recorded. */
 	private static void continueBuilding(ServerLevel level, SkyrimMap m) {
 		Pending job = pending;
-		long deadline = System.nanoTime() + PLACE_NANOS;
+		long deadline = System.nanoTime() + placeNanos();
+		// SkyCraft+ : structure loading. A jigsaw structure's chunk (a village's, an outpost's) is placed
+		// a band at a time, its pieces clipped to it as they are to the chunk (a whole chunk of houses at
+		// once was the longest single step). Others (the mansion, temples, the monument) do more than
+		// their pieces as a chunk is placed (the mansion's foundations), so they still go a chunk at once.
+		boolean banded = job.start().getStructure() instanceof net.minecraft.world.level.levelgen.structure.structures.JigsawStructure;
+		int bottom = job.box().minY() - 1, top = job.box().maxY() + 1;
 		placing = m;
 		placingLevel = level;
 		placingSea = ((Ground) job.ground()).seaBlock();
@@ -717,8 +738,12 @@ public final class SkyStructures {
 				if (!loadedAround(level, c)) {
 					if (waitingSince == 0L) {
 						waitingSince = System.nanoTime();
+						// SkyCraft+ : structure loading. Asked for in the background (a big structure's far
+						// chunks are outside the ticket set when it was laid out: they were waited for ten
+						// seconds, then loaded all at once, a hitch of a second or two).
+						level.getChunkSource().addTicketWithRadius(net.minecraft.server.level.TicketType.PORTAL, c, 2);
 					}
-					if (System.nanoTime() - waitingSince < 10_000_000_000L) {
+					if (System.nanoTime() - waitingSince < 20_000_000_000L) {
 						return;
 					}
 					for (int dx = -1; dx <= 1; dx++) {
@@ -728,13 +753,30 @@ public final class SkyStructures {
 					}
 				}
 				waitingSince = 0L;
-				pendingNext++;
+				if (!banded) {
+					pendingNext++;
+					job.start().placeInChunk(level, level.structureManager(), job.ground(), level.getRandom(),
+						new BoundingBox(c.getMinBlockX(), level.getMinY(), c.getMinBlockZ(), c.getMaxBlockX(), level.getMaxY() + 1, c.getMaxBlockZ()), c);
+					continue;
+				}
+				// (The first band reaches down to the world's bottom and the last up to its top: all of the chunk is placed, as before.)
+				int from = bottom + pendingBand * BAND;
+				int to = from + BAND - 1;
+				boolean last = to >= top;
 				job.start().placeInChunk(level, level.structureManager(), job.ground(), level.getRandom(),
-					new BoundingBox(c.getMinBlockX(), level.getMinY(), c.getMinBlockZ(), c.getMaxBlockX(), level.getMaxY() + 1, c.getMaxBlockZ()), c);
+					new BoundingBox(c.getMinBlockX(), pendingBand == 0 ? level.getMinY() : from, c.getMinBlockZ(), c.getMaxBlockX(), last ? level.getMaxY() + 1 : to,
+						c.getMaxBlockZ()), c);
+				if (last) {
+					pendingBand = 0;
+					pendingNext++;
+				} else {
+					pendingBand++;
+				}
 			}
 		} catch (RuntimeException e) {
 			SkyCraft.LOG.warn("SkyCraft: couldn't finish building {} ({})", job.site().name(), job.site().structure(), e);
 			pendingNext = job.chunks().size();
+			pendingBand = 0;
 		} finally {
 			placing = null;
 			placingLevel = null;
