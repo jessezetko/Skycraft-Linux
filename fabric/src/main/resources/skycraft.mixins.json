@@ -11,6 +11,7 @@
     "ChunkGeneratorStructureMixin",
     "EntityFluidInteractionMixin",
     "EntityPickMixin",
+    "EnchantmentShortcutMixin",
     "EntitySwimMixin",
     "FallingBlockEntityMixin",
     "FallingBlockMixin",

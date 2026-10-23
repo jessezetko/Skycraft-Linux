@@ -159,7 +159,53 @@ public final class SkyShortcuts {
 		}
 	}
 
+	/**
+	 * SkyCraft+ : enchanting across the games. The Minecraft enchantments each of the player's Skyrim things got
+	 * (by "plugin:localId"): a new shortcut for it (worn from the Skyrim panel, made again) has them too.
+	 */
+	public static final net.fabricmc.fabric.api.attachment.v1.AttachmentType<java.util.Map<String, net.minecraft.world.item.enchantment.ItemEnchantments>> ENCHANTS =
+		net.fabricmc.fabric.api.attachment.v1.AttachmentRegistry.<java.util.Map<String, net.minecraft.world.item.enchantment.ItemEnchantments>>builder()
+			.persistent(com.mojang.serialization.Codec.unboundedMap(com.mojang.serialization.Codec.STRING, net.minecraft.world.item.enchantment.ItemEnchantments.CODEC))
+			.copyOnDeath()
+			.buildAndRegister(Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "skyrim_enchants"));
+
+	/** SkyCraft+ : twice a second, each player's shortcuts: enchantments they have are remembered, a shortcut without them gets them back. */
+	private static void enchantsTick(net.minecraft.server.MinecraftServer server) {
+		if (server.getTickCount() % 10 != 0 || !dev.skycraft.SkySettings.flag("minecraftEnchantsOnSkyrim", true)) {
+			return;
+		}
+		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+			var inventory = player.getInventory();
+			java.util.Map<String, net.minecraft.world.item.enchantment.ItemEnchantments> known = player.getAttached(ENCHANTS);
+			for (int i = 0; i < inventory.getContainerSize(); i++) {
+				ItemStack stack = inventory.getItem(i);
+				Ref ref = ref(stack);
+				if (ref == null) {
+					continue;
+				}
+				String key = ref.plugin().toLowerCase(java.util.Locale.ROOT) + ":" + ref.localId();
+				var enchantments = stack.get(DataComponents.ENCHANTMENTS);
+				if (enchantments != null && !enchantments.isEmpty()) {
+					if (known == null || !enchantments.equals(known.get(key))) {
+						known = known == null ? new java.util.HashMap<>() : new java.util.HashMap<>(known);
+						known.put(key, enchantments);
+						player.setAttached(ENCHANTS, known);
+					}
+				} else if (known != null && known.get(key) instanceof net.minecraft.world.item.enchantment.ItemEnchantments remembered) {
+					stack.set(DataComponents.ENCHANTMENTS, remembered);
+				}
+			}
+		}
+	}
+
+	/** SkyCraft+ : the Minecraft item a shortcut is drawn as (its stand-in: an iron sword, a chestplate...), or null. */
+	public static net.minecraft.world.item.@Nullable Item standIn(ItemStack stack) {
+		Identifier model = isShortcut(stack) ? stack.get(DataComponents.ITEM_MODEL) : null;
+		return model == null ? null : BuiltInRegistries.ITEM.getOptional(model).orElse(null);
+	}
+
 	public static void init() {
+		net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(SkyShortcuts::enchantsTick);
 		PayloadTypeRegistry.serverboundPlay().register(Make.TYPE, Make.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(Forget.TYPE, Forget.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(Dropped.TYPE, Dropped.CODEC);

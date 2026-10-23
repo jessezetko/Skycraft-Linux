@@ -88,7 +88,26 @@ public final class SkyWeaponTools {
 		if (hardness == 0.0F) {
 			return 1.0F;
 		}
-		return tool.getDestroySpeed(state) / hardness / (correctTool(state, tool) ? 30.0F : 100.0F);
+		float speed = tool.getDestroySpeed(state);
+		// SkyCraft+ : enchanting across the games. Efficiency on the Skyrim weapon (its shortcut's, on the stand-in) as vanilla's: level² + 1 more speed.
+		int efficiency = efficiency(tool);
+		if (efficiency > 0 && speed > 1.0F) {
+			speed += efficiency * efficiency + 1;
+		}
+		return speed / hardness / (correctTool(state, tool) ? 30.0F : 100.0F);
+	}
+
+	private static int efficiency(ItemStack tool) {
+		var enchantments = tool.get(net.minecraft.core.component.DataComponents.ENCHANTMENTS);
+		if (enchantments == null || enchantments.isEmpty()) {
+			return 0;
+		}
+		for (var entry : enchantments.entrySet()) {
+			if (entry.getKey().is(net.minecraft.world.item.enchantment.Enchantments.EFFICIENCY)) {
+				return entry.getIntValue();
+			}
+		}
+		return 0;
 	}
 
 	public static boolean correctTool(BlockState state, ItemStack tool) {
