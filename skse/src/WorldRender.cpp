@@ -1348,7 +1348,7 @@ float4 BlitPS(BlitV i) : SV_Target
 						break;
 					}
 				},
-				48ull << 20);
+				48ull << 20, 6.0);  // SkyCraft+ : at most about 6 ms a frame, the rest the next (no hitch as a structure comes in)
 			// SkyCraft+ : Skyrim geo. Skyrim's textures loaded since: into their atlas slots.
 			{
 				std::uint32_t                x = 0, y = 0, w = 0, h = 0;

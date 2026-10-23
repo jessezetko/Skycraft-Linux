@@ -57,7 +57,7 @@ namespace skycraft
 		bool ReadWorldEntities(proto::WorldEntities& a_out) const;
 		// Render ring (consumer, render thread): calls a_fn(type, payload, bytes) for each pending
 		// message, up to about a_maxBytes of payload. The payload points into shared memory.
-		void DrainRender(const std::function<void(std::uint32_t, const std::uint8_t*, std::uint32_t)>& a_fn, std::uint64_t a_maxBytes);
+		void DrainRender(const std::function<void(std::uint32_t, const std::uint8_t*, std::uint32_t)>& a_fn, std::uint64_t a_maxBytes, double a_maxMs = 0.0);  // SkyCraft+ : a_maxMs, a time budget (0: none)
 
 		// Overlay triple buffer (consumer side). If a newer frame is available, swaps it into the
 		// front slot and returns true. FrontPixels/FrontHeader describe the current front slot.

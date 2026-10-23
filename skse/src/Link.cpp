@@ -606,8 +606,9 @@ namespace skycraft
 		return false;
 	}
 
-	void Link::DrainRender(const std::function<void(std::uint32_t, const std::uint8_t*, std::uint32_t)>& a_fn, std::uint64_t a_maxBytes)
+	void Link::DrainRender(const std::function<void(std::uint32_t, const std::uint8_t*, std::uint32_t)>& a_fn, std::uint64_t a_maxBytes, double a_maxMs)
 	{
+		const auto start = std::chrono::steady_clock::now();  // SkyCraft+ : a time budget too (a_maxMs; 0: none)
 		if (!base_) {
 			return;
 		}
@@ -620,6 +621,9 @@ namespace skycraft
 		constexpr auto size = proto::kRenRingDataBytes;
 		std::uint64_t  done = 0;
 		while (tail < head && done < a_maxBytes) {
+			if (a_maxMs > 0.0 && done > 0 && std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() > a_maxMs) {
+				break;  // the rest next frame (a structure coming in sent a frame's worth of sections at once: a hitch)
+			}
 			const auto pos = tail % size;
 			const auto* hdr = reinterpret_cast<const proto::ColMsgHeader*>(data + pos);
 			if (hdr->type == proto::kRenPad) {
