@@ -9,6 +9,10 @@ import dev.skycraft.net.SkyNet;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.WeakHashMap;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.minecraft.ChatFormatting;
@@ -28,12 +32,18 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.PathfinderMob;
+import net.minecraft.world.entity.ai.util.DefaultRandomPos;
+import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
+import net.minecraft.world.entity.projectile.arrow.ThrownTrident;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.ItemLore;
+import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -203,21 +213,58 @@ public final class SkyEnchanting {
 				apply(weapon, enchant.withCharge(enchant.charge() - enchant.cost()));
 			}
 			// After the weapon's own hit (which makes the target briefly unhurtable).
-			server.level().getServer().execute(() -> {
-				if (!target.isAlive()) {
-					return;
-				}
-				if (target instanceof SkyrimActorEntity proxy && SkyNet.isHost(server) && SkyLink.active() && enchant.formId() != 0) {
-					SkyLink.pushEvent(Proto.EV_ENCHANT_HIT, proxy.formId(), 0.0F, 0.0F, 0.0F, 0.0F, enchant.formId());  // Skyrim's own enchantment on Skyrim's own
-				} else {
-					for (Effect effect : enchant.list()) {
-						actOut(server, target, effect);
-					}
-				}
-			});
+			server.level().getServer().execute(() -> strike(server, target, enchant));
 			return InteractionResult.PASS;
 		});
 		ServerTickEvents.END_SERVER_TICK.register(SkyEnchanting::wornTick);
+		// SkyCraft+ : a Skyrim-enchanted bow's, crossbow's or trident's shot carries the enchantment (a shot's worth of charge).
+		ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> {
+			if (entity instanceof AbstractArrow arrow && arrow.getOwner() instanceof ServerPlayer player && arrow.tickCount == 0) {
+				shot(player, arrow);
+			}
+		});
+		ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, base, taken, blocked) -> {
+			Enchant enchant = source.getDirectEntity() == null ? null : SHOTS.remove(source.getDirectEntity());
+			if (enchant != null && source.getEntity() instanceof ServerPlayer player && entity.isAlive()) {
+				player.level().getServer().execute(() -> strike(player, entity, enchant));
+			}
+		});
+		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> trapped(entity));
+		ServerTickEvents.END_SERVER_TICK.register(SkyEnchanting::spellTick);
+	}
+
+	/** The enchantment's hit on a target: Skyrim's own on Skyrim's people (the host's), acted out the Minecraft way on the rest. */
+	private static void strike(ServerPlayer player, LivingEntity target, Enchant enchant) {
+		if (!target.isAlive()) {
+			return;
+		}
+		if (target instanceof SkyrimActorEntity proxy && SkyNet.isHost(player) && SkyLink.active() && enchant.formId() != 0) {
+			SkyLink.pushEvent(Proto.EV_ENCHANT_HIT, proxy.formId(), 0.0F, 0.0F, 0.0F, 0.0F, enchant.formId());  // Skyrim's own enchantment on Skyrim's own
+		} else {
+			for (Effect effect : enchant.list()) {
+				actOut(player, target, effect);
+			}
+		}
+	}
+
+	/** Shots in flight from a Skyrim-enchanted weapon, with what they carry (forgotten once they hit, or with the shot). */
+	private static final Map<Entity, Enchant> SHOTS = new WeakHashMap<>();
+
+	private static void shot(ServerPlayer player, AbstractArrow arrow) {
+		ItemStack weapon = arrow instanceof ThrownTrident ? arrow.getPickupItemStackOrigin() : null;
+		if (weapon == null || enchant(weapon) == null) {
+			ItemStack fired = arrow.getWeaponItem();
+			weapon = fired != null && ItemStack.isSameItem(player.getMainHandItem(), fired) ? player.getMainHandItem()
+				: fired != null && ItemStack.isSameItem(player.getOffhandItem(), fired) ? player.getOffhandItem() : null;
+		}
+		Enchant enchant = weapon == null ? null : enchant(weapon);
+		if (enchant == null || worn(weapon) || enchant.max() > 0.0F && enchant.charge() < enchant.cost()) {
+			return;
+		}
+		if (enchant.max() > 0.0F && enchant.cost() > 0.0F) {
+			apply(weapon, enchant.withCharge(enchant.charge() - enchant.cost()));
+		}
+		SHOTS.put(arrow, enchant);
 	}
 
 	/** A weapon's effect, the Minecraft way. Skyrim's numbers are a tenth of a Minecraft heart's worth or so (a mob has 20 health, a bandit 100). */
@@ -236,7 +283,13 @@ public final class SkyEnchanting {
 				hurt(player, target, level.damageSources().freeze(), damage);
 			}
 			case "shock" -> hurt(player, target, level.damageSources().lightningBolt(), damage * 1.25F);
-			case "damage", "stamina", "magicka" -> hurt(player, target, level.damageSources().indirectMagic(player, player), damage);
+			case "damage", "magicka" -> hurt(player, target, level.damageSources().indirectMagic(player, player), damage);
+			case "stamina" -> {
+				// SkyCraft+ : tired out: slower, and its blows weaker
+				hurt(player, target, level.damageSources().indirectMagic(player, player), damage * 0.5F);
+				target.addEffect(new MobEffectInstance(MobEffects.SLOWNESS, ticks, 0), player);
+				target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, ticks, 0), player);
+			}
 			case "absorb_health" -> {
 				hurt(player, target, level.damageSources().indirectMagic(player, player), damage);
 				player.heal(damage);
@@ -245,26 +298,178 @@ public final class SkyEnchanting {
 				target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, ticks, 0), player);
 				player.getFoodData().eat(1, 0.1F);
 			}
+			// SkyCraft+ : the spells that last (fear, calm, frenzy, paralysis, soul trap) hold the mob in spellTick.
+			// Skyrim's "up to level N" has no Minecraft match: a mob counts as up to level N if its most health is N x 4 or less
+			// (a zombie's 20 is level 5); a magnitude of 0 has no cap.
 			case "paralyze" -> {
-				int held = Math.min(ticks, 100);
-				target.addEffect(new MobEffectInstance(MobEffects.SLOWNESS, held, 9), player);
-				target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, held, 9), player);
-			}
-			case "fear", "calm" -> {
 				if (target instanceof Mob mob) {
-					mob.setTarget(null);
+					hold(mob, "paralyze", Math.max(40, Math.min(ticks, 200)), player);
 				}
-				target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, ticks, 0), player);
+				target.addEffect(new MobEffectInstance(MobEffects.SLOWNESS, Math.max(40, Math.min(ticks, 200)), 9), player);
 			}
-			case "frenzy" -> target.addEffect(new MobEffectInstance(MobEffects.GLOWING, ticks, 0), player);
-			case "turn", "banish" -> {
-				if (target.getType().builtInRegistryHolder().is(EntityTypeTags.UNDEAD)) {
-					hurt(player, target, level.damageSources().indirectMagic(player, player), Math.max(4.0F, damage * 2.0F));
+			case "fear" -> {
+				if (target instanceof Mob mob && upTo(mob, effect)) {
+					hold(mob, "fear", ticks, player);
+				}
+			}
+			case "calm" -> {
+				if (target instanceof Mob mob && upTo(mob, effect)) {
+					hold(mob, "calm", ticks, player);
+				}
+			}
+			case "frenzy" -> {
+				if (target instanceof Mob mob && upTo(mob, effect)) {
+					hold(mob, "frenzy", ticks, player);
+					target.addEffect(new MobEffectInstance(MobEffects.GLOWING, ticks, 0), player);
+				}
+			}
+			case "turn" -> {
+				if (undead(target)) {
+					if (target instanceof Mob mob && upTo(mob, effect)) {
+						hold(mob, "fear", ticks, player);  // turned: it runs from the player
+					} else {
+						hurt(player, target, level.damageSources().indirectMagic(player, player), Math.max(4.0F, damage * 2.0F));
+					}
+				}
+			}
+			case "banish" -> {
+				// Skyrim's sends summoned things back where they came from: undead (Minecraft's nearest) up to its level are
+				// sent away, a boss never; the rest take a hard hit.
+				if (undead(target)) {
+					if (target instanceof Mob mob && upTo(mob, effect) && !(mob instanceof net.minecraft.world.entity.boss.wither.WitherBoss)
+						&& mob.getMaxHealth() < 100.0F) {
+						level.sendParticles(net.minecraft.core.particles.ParticleTypes.SOUL_FIRE_FLAME, mob.getX(), mob.getY() + mob.getBbHeight() / 2.0, mob.getZ(), 20, 0.3, 0.5, 0.3, 0.02);
+						level.playSound(null, mob.getX(), mob.getY(), mob.getZ(), SoundEvents.ENDERMAN_TELEPORT, SoundSource.HOSTILE, 1.0F, 0.6F);
+						mob.discard();
+					} else {
+						hurt(player, target, level.damageSources().indirectMagic(player, player), Math.max(6.0F, damage * 3.0F));
+					}
+				}
+			}
+			case "soultrap" -> {
+				if (target instanceof Mob mob) {
+					hold(mob, "soultrap", Math.max(ticks, 60), player);
+					target.addEffect(new MobEffectInstance(MobEffects.GLOWING, Math.max(ticks, 60), 0), player);
 				}
 			}
 			default -> {
 			}
 		}
+	}
+
+	private static boolean undead(LivingEntity target) {
+		return target.getType().builtInRegistryHolder().is(EntityTypeTags.UNDEAD);
+	}
+
+	/** Skyrim's "affects creatures up to level N" (the effect's magnitude), with most health standing in for level. */
+	private static boolean upTo(Mob mob, Effect effect) {
+		return effect.magnitude() <= 0.0F || mob.getMaxHealth() <= effect.magnitude() * 4.0F;
+	}
+
+	/** A mob under one of Skyrim's lasting spells: which, till when (game time), and who cast it. */
+	private record Spell(String kind, long until, java.util.UUID caster) {
+	}
+
+	private static final Map<Mob, Spell> SPELLS = new WeakHashMap<>();
+
+	private static void hold(Mob mob, String kind, int ticks, ServerPlayer caster) {
+		if (kind.equals("soultrap") && SPELLS.get(mob) instanceof Spell other && !other.kind().equals("soultrap")) {
+			SOUL_TRAPPED.put(mob, new Spell(kind, mob.level().getGameTime() + ticks, caster.getUUID()));  // alongside another spell
+			return;
+		}
+		SPELLS.put(mob, new Spell(kind, mob.level().getGameTime() + ticks, caster.getUUID()));
+		if (!kind.equals("soultrap")) {
+			mob.setTarget(null);
+			mob.getNavigation().stop();
+		} else {
+			SOUL_TRAPPED.put(mob, SPELLS.get(mob));
+		}
+	}
+
+	private static final Map<Mob, Spell> SOUL_TRAPPED = new WeakHashMap<>();
+
+	/** Each tick: the mobs under a lasting spell do as it says till it wears off. */
+	private static void spellTick(MinecraftServer server) {
+		if (SPELLS.isEmpty()) {
+			return;
+		}
+		for (var it = SPELLS.entrySet().iterator(); it.hasNext();) {
+			var entry = it.next();
+			Mob mob = entry.getKey();
+			Spell spell = entry.getValue();
+			if (!mob.isAlive() || mob.level().getGameTime() >= spell.until()) {
+				it.remove();
+				continue;
+			}
+			ServerPlayer caster = server.getPlayerList().getPlayer(spell.caster());
+			switch (spell.kind()) {
+				case "paralyze" -> {
+					// Frozen: no moving, no aiming, no attacking (its AI keeps running, so nothing sticks once it wears off).
+					mob.setTarget(null);
+					mob.getNavigation().stop();
+					mob.setDeltaMovement(0.0, Math.min(0.0, mob.getDeltaMovement().y), 0.0);
+					mob.setYRot(mob.yRotO);
+					mob.setYHeadRot(mob.yHeadRotO);
+				}
+				case "calm" -> {
+					if (mob.getTarget() != null) {
+						mob.setTarget(null);
+					}
+					if (mob instanceof net.minecraft.world.entity.NeutralMob neutral) {
+						neutral.stopBeingAngry();
+					}
+				}
+				case "fear" -> {
+					mob.setTarget(null);
+					if (caster != null && caster.level() == mob.level() && (mob.getNavigation().isDone() || mob.tickCount % 20 == 0)) {
+						Vec3 away = mob instanceof PathfinderMob runner ? DefaultRandomPos.getPosAway(runner, 16, 7, caster.position()) : null;
+						if (away != null) {
+							mob.getNavigation().moveTo(away.x, away.y, away.z, 1.4);
+						} else {
+							Vec3 push = mob.position().subtract(caster.position()).multiply(1.0, 0.0, 1.0).normalize().scale(0.25);
+							mob.setDeltaMovement(push.x, mob.getDeltaMovement().y, push.z);
+						}
+					}
+				}
+				case "frenzy" -> {
+					if (mob.tickCount % 10 == 0 && (mob.getTarget() == null || !mob.getTarget().isAlive() || mob.getTarget() instanceof ServerPlayer)) {
+						Mob nearest = null;
+						double best = Double.MAX_VALUE;
+						for (Mob other : mob.level().getEntitiesOfClass(Mob.class, mob.getBoundingBox().inflate(16.0), other -> other != mob && other.isAlive())) {
+							double d = other.distanceToSqr(mob);
+							if (d < best) {
+								best = d;
+								nearest = other;
+							}
+						}
+						mob.setTarget(nearest);
+						if (nearest != null && nearest.getTarget() == null) {
+							nearest.setTarget(mob);  // it fights back
+						}
+					}
+				}
+				default -> {
+				}
+			}
+		}
+	}
+
+	/** A mob that died soul-trapped: its soul for the player. */
+	private static void trapped(LivingEntity entity) {
+		Spell spell = entity instanceof Mob mob ? SOUL_TRAPPED.remove(mob) : null;
+		if (spell == null || entity.level().getGameTime() >= spell.until() || !(entity.level() instanceof ServerLevel level)) {
+			return;
+		}
+		ServerPlayer caster = level.getServer().getPlayerList().getPlayer(spell.caster());
+		if (caster == null) {
+			return;
+		}
+		// TODO(SkyCraft+): fill one of the player's empty Skyrim soul gems (needs a Skyrim-side request); for now the soul
+		// is experience, as much again as the mob gives.
+		int xp = Math.max(5, (int) (entity.getMaxHealth() / 2.0F));
+		net.minecraft.world.entity.ExperienceOrb.award(level, entity.position(), xp);
+		level.sendParticles(net.minecraft.core.particles.ParticleTypes.SOUL, entity.getX(), entity.getY() + entity.getBbHeight() / 2.0, entity.getZ(), 12, 0.3, 0.4, 0.3, 0.05);
+		caster.sendOverlayMessage(Component.literal(entity.getName().getString() + "'s soul captured"));
 	}
 
 	private static void hurt(ServerPlayer player, LivingEntity target, net.minecraft.world.damagesource.DamageSource source, float damage) {
@@ -302,6 +507,9 @@ public final class SkyEnchanting {
 						case "fortify_armor", "resist_magic", "resist_frost", "resist_shock" -> mob = MobEffects.RESISTANCE;
 						case "fortify_stamina" -> mob = MobEffects.HASTE;
 						case "sneak" -> mob = MobEffects.INVISIBILITY;
+						case "fortify_magicka" -> mob = MobEffects.LUCK;  // SkyCraft+ : (no magicka in Minecraft: luck, for loot)
+						case "fortify" -> mob = MobEffects.ABSORPTION;
+						case "carry" -> mob = MobEffects.JUMP_BOOST;  // SkyCraft+ : (no carry weight in Minecraft: a lighter step)
 						default -> {
 						}
 					}
