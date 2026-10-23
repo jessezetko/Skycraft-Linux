@@ -1228,14 +1228,14 @@ namespace skycraft
 			// just loaded (and smeared the picture): Minecraft's comes back to it instead.
 			const bool home = std::exchange(homeCheck, false);
 			if (home && !parked && world >= proto::kDimNether) {
-				logger::info("Minecraft's player is in {} but this save is in Skyrim's world: bringing it back", world == proto::kDimNether ? "the Nether" : "the End");
+				logger::info("Minecraft's player is in {} but this save is in Skyrim's world: bringing it back", world == proto::kDimNether ? "the Nether" : world == proto::kDimEnd ? "the End" : "Minecraft's overworld");
 				bringingBack = 20.0f;
 				teleportPending = true;
 			}
 			// A save made in the Nether or the End loaded with Minecraft's player out in the open world (or
 			// elsewhere in that world): it goes back to where the save was made. (Taken for its coming out of
 			// a portal, Skyrim's player went to Minecraft's place in the open world, nothing loaded round it.)
-			const char* savedName = savedWorld == proto::kDimNether ? "the Nether" : "the End";
+			const char* savedName = savedWorld == proto::kDimNether ? "the Nether" : savedWorld == proto::kDimEnd ? "the End" : "Minecraft's overworld";
 			const bool fromSave = home && std::exchange(savedCheck, false);  // (not again when Minecraft reconnects later)
 			if (fromSave && parked && savedWorld >= proto::kDimNether) {
 				const double dx = mc.x - savedX, dz = mc.z - savedZ;
@@ -1267,7 +1267,8 @@ namespace skycraft
 				}
 			}
 			if (!parked && world >= proto::kDimNether) {
-				logger::info("Minecraft's player went into {}: Skyrim's waits in cell {:08X}", world == proto::kDimNether ? "the Nether" : world == proto::kDimEnd ? "the End" : "a world of Minecraft's own",
+				logger::info("Minecraft's player went into {}: Skyrim's waits in cell {:08X}", world == proto::kDimNether ? "the Nether" : world == proto::kDimEnd ? "the End" :
+					world == proto::kDimOverworld ? "Minecraft's overworld" : "a world of Minecraft's own",
 					waiting->GetFormID());
 				if (st.skyrimMode) {
 					st.skyrimMode = false;  // nothing of Skyrim's to walk on there
@@ -1276,17 +1277,18 @@ namespace skycraft
 				if (auto* lighting = waiting->GetLighting()) {
 					// Skyrim's backdrop there: the Nether's dark red, the End's near black.
 					const bool end = world == proto::kDimEnd;
-					lighting->fogColorNear = end ? RE::Color(10, 8, 14, 0) : RE::Color(51, 8, 8, 0);
+					const bool overworld = world == proto::kDimOverworld;  // SkyCraft+ : the Overworld Portal's: daylight
+					lighting->fogColorNear = overworld ? RE::Color(150, 190, 255, 0) : end ? RE::Color(10, 8, 14, 0) : RE::Color(51, 8, 8, 0);
 					lighting->fogColorFar = lighting->fogColorNear;
-					lighting->ambient = end ? RE::Color(48, 44, 60, 0) : RE::Color(64, 32, 26, 0);
+					lighting->ambient = overworld ? RE::Color(120, 120, 120, 0) : end ? RE::Color(48, 44, 60, 0) : RE::Color(64, 32, 26, 0);
 					// Skyrim's own things in it (the enemies brought in) seen as far as Minecraft's blocks:
 					// the cell's draw distance and fog were its own (short), so they went unseen.
 					lighting->clipDist = 400000.0f;
-					lighting->fogNear = end ? 30000.0f : 1400.0f;
-					lighting->fogFar = end ? 200000.0f : 9000.0f;
+					lighting->fogNear = overworld ? 6000.0f : end ? 30000.0f : 1400.0f;
+					lighting->fogFar = overworld ? 60000.0f : end ? 200000.0f : 9000.0f;
 					lighting->fogPower = 1.0f;
-					lighting->fogClamp = end ? 0.0f : 0.85f;
-					lighting->directional = end ? RE::Color(120, 110, 140, 0) : RE::Color(140, 80, 60, 0);
+					lighting->fogClamp = end || overworld ? 0.0f : 0.85f;
+					lighting->directional = overworld ? RE::Color(255, 248, 230, 0) : end ? RE::Color(120, 110, 140, 0) : RE::Color(140, 80, 60, 0);
 					lighting->lightingTemplateInheritanceFlags.reset();
 				}
 				{
@@ -1694,7 +1696,7 @@ namespace skycraft
 			Combat::PerFrame(a_player, puppet, a_delta);
 			Combat::WatchPlayerHits(a_player, a_delta);
 			SkyrimShots::PerFrame(a_player, (puppet || skyrimDrives) && haveMc && st.mcInWorld, a_delta);
-			MinecraftEnemies::PerFrame(a_player, a_delta, st.parked, st.mcWorld, mc.x, mc.y, mc.z);  // SkyCraft+
+			MinecraftEnemies::PerFrame(a_player, a_delta, st.parked, st.mcWorld, mc.x, mc.y, mc.z, (mc.flags & proto::kMcInVillage) != 0);  // SkyCraft+
 			LootSpots::PerFrame(a_player, a_delta);  // SkyCraft+
 			Crops::PerFrame(a_delta);  // SkyCraft+
 			MusicDiscs::PerFrame();  // SkyCraft+
@@ -2638,7 +2640,7 @@ namespace skycraft
 				return;  // nothing to switch from: Skyrim already has the player
 			}
 			if (!st.skyrimMode && (st.parked || st.mcWorld >= proto::kDimNether)) {
-				// SkyCraft+ : the Nether and the End have nothing of Skyrim's to walk on.
+				// SkyCraft+ : the Nether, the End and Minecraft's overworld have nothing of Skyrim's to walk on.
 				RE::SendHUDMessage::ShowHUDMessage("SkyCraft: Skyrim mode isn't available in Minecraft's own worlds");
 				return;
 			}
@@ -2679,7 +2681,7 @@ namespace skycraft
 				logger::warn("couldn't keep Minecraft's world in the save");
 				return;
 			}
-			logger::info("saved in {} at ({:.0f}, {:.0f}, {:.0f})", world == proto::kDimNether ? "the Nether" : "the End", mc.x, mc.y, mc.z);
+			logger::info("saved in {} at ({:.0f}, {:.0f}, {:.0f})", world == proto::kDimNether ? "the Nether" : world == proto::kDimEnd ? "the End" : "Minecraft's overworld", mc.x, mc.y, mc.z);
 		}
 
 		void OnLoad(SKSE::SerializationInterface* a_intfc)
@@ -2705,7 +2707,7 @@ namespace skycraft
 					continue;
 				}
 				if (type == kWorldRecord && version == 1 && a_intfc->ReadRecordData(world) && a_intfc->ReadRecordData(x) && a_intfc->ReadRecordData(y) &&
-					a_intfc->ReadRecordData(z) && (world == proto::kDimNether || world == proto::kDimEnd)) {
+					a_intfc->ReadRecordData(z) && (world == proto::kDimNether || world == proto::kDimEnd || world == proto::kDimOverworld)) {
 					savedWorld = world;
 					savedX = x, savedY = y, savedZ = z;
 					savedCheck = true;

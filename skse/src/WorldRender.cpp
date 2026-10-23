@@ -1740,6 +1740,23 @@ float4 BlitPS(BlitV i) : SV_Target
 		// through a soft exposure curve (1 - e^-kx) to land in displayable range.
 		constexpr float kExposure = 1.6f;
 
+		// SkyCraft+ : how light it is in Minecraft's overworld by Skyrim's hour: 1 by day, 0.15 at night, eased at dawn and dusk.
+		float OverworldDaylight()
+		{
+			auto*       calendar = RE::Calendar::GetSingleton();
+			const float hour = calendar ? calendar->GetHour() : 12.0f;
+			if (hour >= 7.0f && hour <= 19.0f) {
+				return 1.0f;
+			}
+			if (hour >= 5.0f && hour < 7.0f) {
+				return 0.15f + 0.85f * (hour - 5.0f) / 2.0f;
+			}
+			if (hour > 19.0f && hour <= 21.0f) {
+				return 0.15f + 0.85f * (21.0f - hour) / 2.0f;
+			}
+			return 0.15f;
+		}
+
 		void Set4(float a_out[4], float a_x, float a_y, float a_z, float a_w)
 		{
 			a_out[0] = a_x, a_out[1] = a_y, a_out[2] = a_z, a_out[3] = a_w;
@@ -2046,13 +2063,26 @@ float4 BlitPS(BlitV i) : SV_Target
 			// close red fog, the End's pale violet.
 			if (State().parked) {
 				const bool end = State().mcWorld == proto::kDimEnd;
+				// SkyCraft+ : Minecraft's overworld (the Overworld Portal's): white daylight by Skyrim's hour (Minecraft
+				// follows it), dim at night; a pale blue haze far off.
+				const bool  overworld = State().mcWorld == proto::kDimOverworld;
+				const float day = overworld ? OverworldDaylight() : 1.0f;
 				for (auto& a : a_fc.ambient) {
-					Set4(a, end ? 0.75f : 1.0f, end ? 0.7f : 0.55f, end ? 0.9f : 0.45f, 0.0f);
+					if (overworld) {
+						Set4(a, 0.25f + 0.75f * day, 0.27f + 0.73f * day, 0.35f + 0.65f * day, 0.0f);
+					} else {
+						Set4(a, end ? 0.75f : 1.0f, end ? 0.7f : 0.55f, end ? 0.9f : 0.45f, 0.0f);
+					}
 				}
 				a_fc.sunColor[0] = a_fc.sunColor[1] = a_fc.sunColor[2] = 0.0f;
 				a_fc.shadowParams[0] = 0.0f;
 				Set4(a_fc.grade, 1, 1, 1, 0);
-				if (end) {
+				if (overworld) {
+					constexpr float nearD = 64.0f * 70.0f, farD = 220.0f * 70.0f;
+					Set4(a_fc.fogNear, 0.55f * day + 0.02f, 0.7f * day + 0.03f, 0.95f * day + 0.08f, 1.0f);
+					Set4(a_fc.fogFar, 0.55f * day + 0.02f, 0.7f * day + 0.03f, 0.95f * day + 0.08f, 0.0f);
+					Set4(a_fc.fogRange, 1.0f / (farD - nearD), nearD / (farD - nearD), 1.0f, 0.8f);
+				} else if (end) {
 					a_fc.fogNear[3] = 0.0f;
 					Set4(a_fc.fogRange, 0.0f, 0.0f, 1.0f, 0.0f);
 				} else {
@@ -3430,7 +3460,10 @@ float4 BlitPS(BlitV i) : SV_Target
 				return;
 			}
 			const bool  end = st.mcWorld == proto::kDimEnd;
-			const float fog[4] = { end ? 0.04f : 0.2f, 0.03f, end ? 0.06f : 0.03f, 1.0f };
+			const float day = OverworldDaylight();
+			const bool  overworld = st.mcWorld == proto::kDimOverworld;  // SkyCraft+ : Minecraft's sky blue (dark at night)
+			const float fog[4] = { overworld ? 0.47f * day + 0.02f : end ? 0.04f : 0.2f, overworld ? 0.65f * day + 0.03f : 0.03f,
+				overworld ? 1.0f * day + 0.08f : end ? 0.06f : 0.03f, 1.0f };
 			const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 			pctx->ClearRenderTargetView(prtv, fog);
 			if (pmotion) {

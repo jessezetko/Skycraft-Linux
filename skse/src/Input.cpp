@@ -172,6 +172,11 @@ namespace skycraft
 			State().skyrimEnemiesOption = ini.GetBoolValue("Worlds", "bSkyrimEnemies", true);
 			State().netherEnemies = formList("sNetherEnemies", "0x1E79B, 0x25D1A, 0x25D1B, 0x23AA6, 0x2D2D4, 0x23AB0, 0x33973");
 			State().endEnemies = formList("sEndEnemies", "0x23AA7, 0x23ABD, 0x10FCE5, 0x10EC90, 0x10EC8F, 0x23AA8, 0x23AB3");
+			// SkyCraft+ : the Overworld Portal's world (prey and travellers by day; predators, bandits, vampires and witches at
+			// night; guards, hunters and adventurers about villages).
+			State().overworldDay = formList("sOverworldDay", "0x42298, 0x42294, 0xABEDC, 0xDB2AC, 0x68D6F, 0x73FC2, 0x1050F8, 0xBFB53");
+			State().overworldNight = formList("sOverworldNight", "0xB83C2, 0x42297, 0x42293, 0x42266, 0xFE2D5, 0x41FB6, 0x33973, 0x1A345, 0x1B0E9, 0x1B0F3, 0x74F9D");
+			State().overworldVillage = formList("sOverworldVillage", "0xE7B2C, 0xE7B2D, 0x73FC2, 0x1050F8, 0xC6013");
 			State().enemyCap = static_cast<int>(ini.GetLongValue("Worlds", "iEnemyCap", 6));
 			State().enemySeconds = static_cast<float>(ini.GetDoubleValue("Worlds", "fEnemySeconds", 12.0));
 			State().structureMarkersOption = ini.GetBoolValue("Worlds", "bStructureMarkers", true);

@@ -691,6 +691,9 @@ public final class SkyClient {
 		if (dimension == net.minecraft.world.level.Level.NETHER) {
 			return Proto.DIM_NETHER;
 		}
+		if (dimension == dev.skycraft.world.SkyOverworld.OVERWORLD) {
+			return Proto.DIM_OVERWORLD;  // SkyCraft+ : the Overworld Portal's
+		}
 		return dimension == net.minecraft.world.level.Level.END ? Proto.DIM_END : Proto.DIM_OTHER;
 	}
 
@@ -822,6 +825,10 @@ public final class SkyClient {
 		// SkyCraft+ : Skyrim's inventory in Minecraft's (and the shortcuts' counts). Skyrim keeps its list current meanwhile.
 		if (SkyShortcutsClient.wanted()) {
 			flags |= Proto.MC_WANTS_SKY_INVENTORY;
+		}
+		// SkyCraft+ : the Overworld Portal's world. In one of its villages: Skyrim's guards and travellers come about.
+		if (player != null && dev.skycraft.world.SkyOverworld.inVillage(player.getUUID())) {
+			flags |= Proto.MC_IN_VILLAGE;
 		}
 		// SkyCraft+ : the underground. Under Skyrim's land, by the land heights it has sent (where it
 		// hasn't sent any around here yet, as before).

@@ -179,7 +179,7 @@ public final class SkyDig {
 	 */
 	public static boolean minecraftsOwnWorld(Level level) {
 		var dimension = level.dimension();
-		return dimension == Level.NETHER || dimension == Level.END || dimension == SkyUnderground.UNDERGROUND;
+		return dimension == Level.NETHER || dimension == Level.END || dimension == SkyUnderground.UNDERGROUND || dimension == SkyOverworld.OVERWORLD;
 	}
 
 	public static boolean isDug(Level level, int world, BlockPos pos) {

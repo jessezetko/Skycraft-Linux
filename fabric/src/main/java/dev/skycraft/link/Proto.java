@@ -8,7 +8,7 @@ public final class Proto {
 	}
 
 	public static final int MAGIC = 0x43594B53;
-	public static final int VERSION = 62; // SkyCraft+ : v50, KotIsOff's atlas in bands (kRenAtlasChunk); v51, Skyrim mode's collision and lock-on (kWeMob, kSkySkyrimControl); v52, SKY_ACT_DESTROY; v53, taming and feeding (EV_TAME, EV_GROW_BABY, ACTOR_TAMED); v54, Minecraft's things at Skyrim's workbenches (SS_WORKBENCH, STORE_LEND_GEAR/RETURN_GEAR, EV_ENCHANT_HIT); v55, arrows across the games (SHOT_ARROW), Skyrim mode's Activate (MS_USE_DISTANCE); v56, the settings screen (OFF_SKY_SETTINGS); v57, every shout in Minecraft mode (SHOT_PARALYZE.., SS_SELF_EFFECTS); v58, Skyrim geo (REN_SKYRIM_TEXTURE, STORE_TEXTURE_AT, SKY_GEO); v59, beds (EV_SLEPT, EV_GO_TO_BED), bow enchantments (EV_BOW_ENCHANTS); v60, Minecraft arrows on the Skyrim bow (EV_BOW_ENCHANTS flag 4); v61, SHOT_LENT, Skyrim arrows from a Minecraft bow (WE_SKYRIM_ARROW), Skyrim blocks' item pictures (STORE_TEXTURE_PICTURE); v62, Skyrim music discs (EV_JUKEBOX), Skyrim's workbenches taken and placed (DIG_WORKBENCH, STORE_TAKE_WORKBENCH, EV_PLACE_WORKBENCH), the Overworld Portal's world (DIM_OVERWORLD)
+	public static final int VERSION = 62; // SkyCraft+ : v50, KotIsOff's atlas in bands (kRenAtlasChunk); v51, Skyrim mode's collision and lock-on (kWeMob, kSkySkyrimControl); v52, SKY_ACT_DESTROY; v53, taming and feeding (EV_TAME, EV_GROW_BABY, ACTOR_TAMED); v54, Minecraft's things at Skyrim's workbenches (SS_WORKBENCH, STORE_LEND_GEAR/RETURN_GEAR, EV_ENCHANT_HIT); v55, arrows across the games (SHOT_ARROW), Skyrim mode's Activate (MS_USE_DISTANCE); v56, the settings screen (OFF_SKY_SETTINGS); v57, every shout in Minecraft mode (SHOT_PARALYZE.., SS_SELF_EFFECTS); v58, Skyrim geo (REN_SKYRIM_TEXTURE, STORE_TEXTURE_AT, SKY_GEO); v59, beds (EV_SLEPT, EV_GO_TO_BED), bow enchantments (EV_BOW_ENCHANTS); v60, Minecraft arrows on the Skyrim bow (EV_BOW_ENCHANTS flag 4); v61, SHOT_LENT, Skyrim arrows from a Minecraft bow (WE_SKYRIM_ARROW), Skyrim blocks' item pictures (STORE_TEXTURE_PICTURE); v62, Skyrim music discs (EV_JUKEBOX), Skyrim's workbenches taken and placed (DIG_WORKBENCH, STORE_TAKE_WORKBENCH, EV_PLACE_WORKBENCH), the Overworld Portal's world (DIM_OVERWORLD, MC_IN_VILLAGE)
 	// A second client on the same PC (multiplayer testing) talks to its own stand-in Skyrim:
 	// -Dskycraft.link=Local\SkyCraft_guest (see tools/fake_guest.py).
 	public static final String MAPPING_NAME = System.getProperty("skycraft.link", "Local\\SkyCraft_v1");
@@ -340,6 +340,7 @@ public final class Proto {
 	public static final int MC_DEEP_UNDER_LAND = 1 << 10; // SkyCraft+ : v31, 24 blocks and more under
 	public static final int MC_SLOT_SCREEN = 1 << 11; // SkyCraft+ : v34, a screen with item slots
 	public static final int MC_WANTS_SKY_INVENTORY = 1 << 12; // SkyCraft+ : v35
+	public static final int MC_IN_VILLAGE = 1 << 13; // SkyCraft+ : v62, in one of Minecraft's villages (the Overworld Portal's world)
 
 	// SkyCraft+ : McState dimension (v26). 3 and up: Minecraft's own worlds, Skyrim parks its player.
 	public static final int DIM_TAMRIEL = 0;

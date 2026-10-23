@@ -169,7 +169,7 @@ public final class SkyMinecraftWorlds {
 			return new Vec3(frame.getX() + 0.5, frame.getY() + 13.0 / 16.0, frame.getZ() + 0.5);
 		}
 		BlockState here = level.getBlockState(at);
-		if (here.is(Blocks.NETHER_PORTAL)) {
+		if (here.is(Blocks.NETHER_PORTAL) || here.is(SkyOverworld.PORTAL)) {  // (SkyCraft+ : or an Overworld Portal)
 			// Out of the portal's plane, to whichever side is open.
 			Direction.Axis axis = here.getValue(BlockStateProperties.HORIZONTAL_AXIS);
 			Direction side = axis == Direction.Axis.X ? Direction.SOUTH : Direction.EAST;

@@ -35,6 +35,9 @@ namespace skycraft::MinecraftEnemies
 			double              floor = 0.0;     // Minecraft y it last stood at, alive
 			float               deadFor = 0.0f;
 			bool                laidDown = false;  // its body held where it fell
+			bool                peaceful = false;  // SkyCraft+ : the Overworld's animals and travellers: not set on the player; they wander
+			double              wanderX = 0.0, wanderZ = 0.0;  // where it's ambling to (MC coords)
+			float               wanderFor = 0.0f;  // seconds till it picks somewhere else
 		};
 		std::vector<Spawned> spawned;
 
@@ -175,7 +178,7 @@ namespace skycraft::MinecraftEnemies
 			return false;
 		}
 
-		void Spawn(RE::PlayerCharacter* a_player, const std::vector<RE::FormID>& a_kinds, double a_x, double a_y, double a_z)
+		void Spawn(RE::PlayerCharacter* a_player, const std::vector<RE::FormID>& a_kinds, double a_x, double a_y, double a_z, bool a_peaceful = false)
 		{
 			if (a_kinds.empty()) {
 				return;
@@ -198,6 +201,7 @@ namespace skycraft::MinecraftEnemies
 			const auto face = McToSky(a_x, a_y, a_z) - at;
 			ref->data.angle.z = std::atan2(face.x, face.y);
 			spawned.push_back({ ref->CreateRefHandle(), at, 0.0f, 0.0f });
+			spawned.back().peaceful = a_peaceful;
 			const auto mc = SkyToMc(at);
 			auto* placed = ref->GetBaseObject();
 			logger::info("Skyrim enemies: {} ({:08X}) at {:.0f} {:.0f} {:.0f}", placed ? placed->GetName() : "?", id, mc.x, mc.y, mc.z);
@@ -208,6 +212,38 @@ namespace skycraft::MinecraftEnemies
 		 * has stood still a moment, it's walked straight at the player over Minecraft's blocks (up a
 		 * one-block step; not into walls).
 		 */
+		// SkyCraft+ : one of the Overworld's animals or travellers not fighting ambles about (no navmesh: walked by hand).
+		void Wander(Spawned& a_s, RE::Actor* a_actor, float a_delta)
+		{
+			const auto here = SkyToMc(a_actor->GetPosition());
+			if ((a_s.wanderFor -= a_delta) <= 0.0f) {
+				a_s.wanderFor = Uniform(6.0f, 14.0f);
+				const bool rest = Uniform(0.0f, 1.0f) < 0.4f;
+				const float angle = Uniform(0.0f, 6.2831853f), reach = Uniform(3.0f, 9.0f);
+				a_s.wanderX = rest ? here.x : here.x + std::cos(angle) * reach;
+				a_s.wanderZ = rest ? here.z : here.z + std::sin(angle) * reach;
+			}
+			const double dx = a_s.wanderX - here.x, dz = a_s.wanderZ - here.z;
+			const double distance = std::sqrt(dx * dx + dz * dz);
+			if (distance < 0.3) {
+				return;
+			}
+			const double step = std::min<double>(1.6 * a_delta, distance);
+			const double nx = here.x + dx / distance * step, nz = here.z + dz / distance * step;
+			const int    bx = int(std::floor(nx)), bz = int(std::floor(nz)), by = int(std::floor(here.y + 0.05));
+			double       ny = here.y;
+			if (NpcBlocks::BlocksBody(bx, by, bz) || NpcBlocks::BlocksBody(bx, by + 1, bz)) {
+				if (NpcBlocks::BlocksBody(bx, by + 1, bz) || NpcBlocks::BlocksBody(bx, by + 2, bz)) {
+					a_s.wanderFor = 0.0f;  // a wall: somewhere else
+					return;
+				}
+				ny = by + 1.0;
+			}
+			a_actor->SetPosition(McToSky(nx, ny, nz), true);
+			a_s.last = a_actor->GetPosition();
+			a_actor->data.angle.z = std::atan2(float(dx), float(-dz));
+		}
+
 		void Steer(RE::PlayerCharacter* a_player, Spawned& a_s, RE::Actor* a_actor, float a_delta)
 		{
 			const auto pos = a_actor->GetPosition();
@@ -215,6 +251,9 @@ namespace skycraft::MinecraftEnemies
 			a_s.last = pos;
 			if (!a_actor->IsInCombat()) {
 				a_s.still = 0.0f;
+				if (a_s.peaceful) {
+					Wander(a_s, a_actor, a_delta);
+				}
 				return;
 			}
 			const auto  here = SkyToMc(pos);
@@ -255,14 +294,15 @@ namespace skycraft::MinecraftEnemies
 		wasThere = false;
 	}
 
-	void PerFrame(RE::PlayerCharacter* a_player, float a_delta, bool a_parked, std::uint32_t a_world, double a_x, double a_y, double a_z)
+	void PerFrame(RE::PlayerCharacter* a_player, float a_delta, bool a_parked, std::uint32_t a_world, double a_x, double a_y, double a_z, bool a_inVillage)
 	{
 		auto&      st = State();
 		// (In from 900 blocks, out under 850: back and forth across the line, it cleared the enemies
 		// and their loot each time.)
 		const double fromCentre = std::sqrt(a_x * a_x + a_z * a_z);
 		const bool   endCities = a_world == proto::kDimEnd && fromCentre > (wasThere ? kEndCityBlocks - 50.0f : kEndCityBlocks);
-		const bool here = a_parked && st.skyrimEnemiesOption && (a_world == proto::kDimNether || endCities);
+		const bool overworld = a_world == proto::kDimOverworld;  // SkyCraft+ : the Overworld Portal's world
+		const bool here = a_parked && st.skyrimEnemiesOption && (a_world == proto::kDimNether || endCities || overworld);
 		if (here != wasThere) {
 			wasThere = here;
 			// A clean cell: none left over from a save or an earlier visit (the dead stay lootable
@@ -325,7 +365,7 @@ namespace skycraft::MinecraftEnemies
 				it->relocated += a_delta;
 				// Nothing here lets Skyrim's AI notice the player (an empty cell, no navmesh): one that
 				// isn't fighting stood where it came in. Set on the player, it comes (Steer).
-				if (!actor->IsInCombat() && (it->callOut -= a_delta) <= 0.0f) {
+				if (!actor->IsInCombat() && !it->peaceful && (it->callOut -= a_delta) <= 0.0f) {
 					it->callOut = 2.0f;
 					if (actor->GetPosition().GetDistance(me) < kForgetBlocks * float(proto::kUnitsPerBlock)) {
 						actor->StartCombat(a_player);
@@ -349,7 +389,18 @@ namespace skycraft::MinecraftEnemies
 		timer -= a_delta;
 		if (timer <= 0.0f) {
 			timer = st.enemySeconds * Uniform(0.6f, 1.4f);
-			if (alive < st.enemyCap) {
+			if (alive < st.enemyCap && overworld) {
+				// SkyCraft+ : Skyrim's game hour (Minecraft follows it): its enemies at night; by day its animals and
+				// travellers, and about Minecraft's villages its guards and adventurers.
+				auto*       calendar = RE::Calendar::GetSingleton();
+				const float hour = calendar ? calendar->GetHour() : 12.0f;
+				const bool  night = hour < 6.0f || hour >= 20.0f;
+				if (night) {
+					Spawn(a_player, st.overworldNight, a_x, a_y, a_z);
+				} else {
+					Spawn(a_player, a_inVillage && Uniform(0.0f, 1.0f) < 0.6f ? st.overworldVillage : st.overworldDay, a_x, a_y, a_z, true);
+				}
+			} else if (alive < st.enemyCap) {
 				Spawn(a_player, a_world == proto::kDimNether ? st.netherEnemies : st.endEnemies, a_x, a_y, a_z);
 			}
 		}

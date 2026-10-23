@@ -154,6 +154,7 @@ public final class SkySettingsScreen extends Screen {
 		{ "Spawning", "caveMonsters", "true", "Monsters in dark caves you've dug into (torches keep them away)." },
 		{ "Spawning", "caveMonsterCap", "6", "The most monsters in caves around you." },
 		{ "Spawning", "caveMonsterSpawnRate", "100", "How fast monsters come in caves you've dug, in percent (100: a try every second; 50: half as fast; 200: twice)." },
+		{ "World", "overworldPortal", "true", "A frame of Minecraft dirt (shaped like a Nether portal) lit with flint and steel leads to Minecraft's own overworld: a normal Minecraft world, with Skyrim's animals by day, its enemies at night and its guards about villages." },
 		{ "World", "skyrimStructures", "true", "Minecraft's villages, temples, outposts and the rest in Skyrim's world. Off: they're put away as they are (loot taken stays taken) and come back as they were when on again." },
 		{ "World", "structureBuildBudgetMs", "6", "Milliseconds a game tick spends building a structure that's coming in (1 to 30). Lower: smoother while it loads, but it takes longer to appear; higher: the other way round." },
 		{ "World", "structuresOffMountains", "true", "Structures keep off steep mountainsides (fewer villages, none on a slope)." },

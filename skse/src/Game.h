@@ -60,6 +60,11 @@ namespace skycraft
 		bool                       skyrimEnemiesOption{ true };
 		std::vector<RE::FormID>    netherEnemies;
 		std::vector<RE::FormID>    endEnemies;
+		// SkyCraft+ (v62): the Overworld Portal's world: Skyrim's animals and travellers by day, its enemies at night,
+		// guards and travellers about Minecraft's villages ([Worlds] sOverworldDay, sOverworldNight, sOverworldVillage).
+		std::vector<RE::FormID>    overworldDay;
+		std::vector<RE::FormID>    overworldNight;
+		std::vector<RE::FormID>    overworldVillage;
 		int                        enemyCap{ 6 };
 		float                      enemySeconds{ 12.0f };
 		// SkyCraft+ : Minecraft's structures marked on Skyrim's map and compass ([Worlds] bStructureMarkers).
@@ -569,7 +574,7 @@ namespace skycraft
 	{
 		// Main thread, every frame: spawns, steers and clears Skyrim enemies around the parked player
 		// (feet in Minecraft coordinates).
-		void PerFrame(RE::PlayerCharacter* a_player, float a_delta, bool a_parked, std::uint32_t a_world, double a_x, double a_y, double a_z);
+		void PerFrame(RE::PlayerCharacter* a_player, float a_delta, bool a_parked, std::uint32_t a_world, double a_x, double a_y, double a_z, bool a_inVillage);
 		// Main thread, every frame while Minecraft is in its world: other people's projectiles stop at
 		// Minecraft's solid blocks.
 		void StopShotsAtBlocks(RE::PlayerCharacter* a_player);
