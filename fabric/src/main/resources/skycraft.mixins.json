@@ -6,6 +6,8 @@
     "AbstractArrowAccessor",
     "AbstractArrowMixin",
     "BlockCollisionsMixin",
+    "BoatItemSkyrimWaterMixin",
+    "BoatSkyrimWaterMixin",
     "BlockStateBaseMixin",
     "BucketSkyrimWaterMixin",
     "ChunkGeneratorStructureMixin",

@@ -169,6 +169,7 @@ public final class SkySettingsScreen extends Screen {
 		{ "World", "holdMobsWithoutGround", "true", "Mobs are held still where Skyrim's ground isn't known yet, so they don't fall out of the world." },
 		{ "World", "mobWanderFix", "true", "Mobs don't pile up on high spots when they wander." },
 		{ "World", "bedsInSkyrim", "true", "Sleeping the night through in a Minecraft bed moves Skyrim's clock to the morning; after a death and the reload you're taken to your bed (load the save again to go back)." },
+		{ "World", "boatsOnSkyrimWater", "true", "Minecraft boats and rafts float on Skyrim's lakes, rivers and sea; one left out of the player's reach stays where it was." },
 		{ "Items & combat", "skyrimArmorSlots", "true", "Skyrim armor goes in Minecraft's armor slots (and more slots for gauntlets, necklace, ring)." },
 		{ "Items & combat", "skyrimStorage", "true", "Skyrim items can be put in Minecraft's chests, barrels, bundles and the like." },
 		{ "Items & combat", "skyrimItemsInMinecraft", "true", "Skyrim things dragged into your Minecraft inventory leave Skyrim's (no doubles, no weight there; weapons, arrows and armor go back once in your hand or an armor slot); drop them on the Skyrim panel to put them back. Off: shortcuts, as before." },

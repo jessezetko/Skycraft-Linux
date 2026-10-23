@@ -52,6 +52,16 @@ public final class SkyWater {
 		return s < -1.0e20F ? Double.NaN : s;
 	}
 
+	/** SkyCraft+ : true if Skyrim's latest grid covers this column (with water or without). */
+	public static boolean covers(int x, int z) {
+		Grid g = grid;
+		if (g == null) {
+			return false;
+		}
+		int dx = x - g.originX(), dz = z - g.originZ();
+		return dx >= 0 && dz >= 0 && dx < g.size() && dz < g.size();
+	}
+
 	/** How much of this block (0..1) is under Skyrim's water; 0 above the surface. */
 	public static float depthIn(BlockPos pos) {
 		double s = surfaceAt(pos.getX(), pos.getZ());

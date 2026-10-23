@@ -51,6 +51,7 @@ public final class SkyCraft implements ModInitializer {
 		dev.skycraft.world.SkyInteriors.init();
 		dev.skycraft.world.SkyHold.init();
 		dev.skycraft.world.SkyPets.init(); // SkyCraft+ : pets through Skyrim's doors
+		dev.skycraft.world.SkyBoats.init(); // SkyCraft+ : boats on Skyrim's water
 		dev.skycraft.world.SkyOreVein.init(); // SkyCraft+ : Skyrim's ore veins
 		dev.skycraft.world.SkyCrops.init(); // SkyCraft+ : Skyrim crops on Minecraft farmland
 		dev.skycraft.world.SkyPatches.init(); // SkyCraft+ : Minecraft patches in Skyrim's ground
