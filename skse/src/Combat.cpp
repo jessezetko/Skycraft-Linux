@@ -120,6 +120,51 @@ namespace skycraft
 			}
 		};
 
+		// SkyCraft+ : Minecraft enchantments on the Skyrim weapons in hand (kEvMeleeEnchants; right hand bits 0-15, left 16-31).
+		std::atomic<std::uint32_t> meleeEnchants{ 0 };
+
+		bool RaceNamed(RE::Actor* a_actor, std::initializer_list<const char*> a_words)
+		{
+			auto* race = a_actor ? a_actor->GetRace() : nullptr;
+			const std::string name = race && race->GetFullName() ? race->GetFullName() : "";
+			return std::ranges::any_of(a_words, [&](const char* w) { return name.find(w) != std::string::npos; });
+		}
+
+		// The player's Skyrim weapon hit one of Skyrim's people: its Minecraft enchantments act as in Minecraft (more damage,
+		// by Minecraft's hit scale; fire's burn at once; knockback a stagger).
+		void MinecraftEnchantsHit(RE::PlayerCharacter* a_player, RE::Actor* a_target, RE::FormID a_source)
+		{
+			const auto all = meleeEnchants.load();
+			if (all == 0 || !a_target || a_target->IsDead()) {
+				return;
+			}
+			auto* right = a_player->GetEquippedObject(false);
+			auto* left = a_player->GetEquippedObject(true);
+			std::uint32_t bits = right && right->GetFormID() == a_source ? (all & 0xFFFF) : left && left->GetFormID() == a_source ? (all >> 16) : 0;
+			if (bits == 0) {
+				return;
+			}
+			const int sharpness = bits & 7, smite = (bits >> 3) & 7, bane = (bits >> 6) & 7, fire = (bits >> 9) & 3, knockback = (bits >> 11) & 3;
+			const bool undead = a_target->HasKeywordString("ActorTypeUndead");
+			const bool arthropod = RaceNamed(a_target, { "Spider", "Chaurus", "Mudcrab", "Spriggan Swarm" });
+			float points = sharpness > 0 ? 0.5f * sharpness + 0.5f : 0.0f;
+			points += undead ? 2.5f * smite : 0.0f;
+			points += arthropod ? 2.5f * bane : 0.0f;
+			points += 4.0f * fire;
+			const float scale = State().mcDamageBase + State().mcDamagePerLevel * a_player->GetLevel();
+			if (points > 0.0f) {
+				a_target->AsActorValueOwner()->DamageActorValue(RE::ActorValue::kHealth, points * scale);
+			}
+			if (knockback > 0) {
+				a_target->SetGraphVariableFloat("staggerMagnitude", 0.35f * knockback);
+				a_target->NotifyAnimationGraph("staggerStart");
+			}
+			static int logged = 0;
+			if (logged++ < 10) {
+				logger::info("Minecraft enchantments on a Skyrim weapon: {} took {:.0f} more{}", a_target->GetName(), points * scale, knockback ? ", staggered" : "");
+			}
+		}
+
 		class HitSink final : public RE::BSTEventSink<RE::TESHitEvent>
 		{
 		public:
@@ -132,6 +177,10 @@ namespace skycraft
 			RE::BSEventNotifyControl ProcessEvent(const RE::TESHitEvent* a_event, RE::BSTEventSource<RE::TESHitEvent>*) override
 			{
 				auto* player = RE::PlayerCharacter::GetSingleton();
+				// SkyCraft+ : the player's Skyrim weapon (not a shot) on one of Skyrim's people.
+				if (a_event && player && a_event->cause.get() == player && a_event->projectile == 0 && a_event->target && a_event->target.get() != player) {
+					MinecraftEnchantsHit(player, a_event->target->As<RE::Actor>(), a_event->source);
+				}
 				if (!a_event || !player || a_event->target.get() != player || !State().puppeting) {
 					return RE::BSEventNotifyControl::kContinue;
 				}
@@ -1204,6 +1253,9 @@ namespace skycraft
 					break;
 				case proto::kEvGoToBed:
 					Game::GoToBed(a_player, ev);  // SkyCraft+ : beds
+					break;
+				case proto::kEvMeleeEnchants:
+					meleeEnchants = ev.flags;  // SkyCraft+ : Minecraft enchantments on Skyrim weapons
 					break;
 				case proto::kEvSoulTrapped:
 					Workbench::SoulTrapped(a_player, ev.flags);  // SkyCraft+ : soul trap on Minecraft mobs

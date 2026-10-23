@@ -91,9 +91,33 @@ public final class SkyArrowsClient {
 		lendToSkyrimBow(player, inventory);
 		readyOffHandSkyrimArrows(player);
 		tellBowEnchantments(player);
+		tellMeleeEnchantments(player);  // SkyCraft+
 	}
 
 	private static int sentBow = -1, sentBowAt;
+	private static int sentMelee = -1, sentMeleeAt;
+
+	/** SkyCraft+ : Minecraft enchantments on the Skyrim weapons in hand, for their hits on Skyrim's people (Combat.cpp). */
+	private static void tellMeleeEnchantments(LocalPlayer player) {
+		int bits = meleeBits(player.getMainHandItem()) | meleeBits(player.getOffhandItem()) << 16;
+		if (bits != sentMelee || bits != 0 && ticks - sentMeleeAt >= 40) {
+			SkyLink.pushEvent(Proto.EV_MELEE_ENCHANTS, 0, 0.0F, 0.0F, 0.0F, 0.0F, bits);
+			sentMelee = bits;
+			sentMeleeAt = ticks;
+		}
+	}
+
+	private static int meleeBits(ItemStack held) {
+		if (!dev.skycraft.net.SkyShortcuts.isShortcut(held)) {
+			return 0;
+		}
+		int sharpness = Math.min(7, SkyArrows.level(held, net.minecraft.world.item.enchantment.Enchantments.SHARPNESS));
+		int smite = Math.min(7, SkyArrows.level(held, net.minecraft.world.item.enchantment.Enchantments.SMITE));
+		int bane = Math.min(7, SkyArrows.level(held, net.minecraft.world.item.enchantment.Enchantments.BANE_OF_ARTHROPODS));
+		int fire = Math.min(3, SkyArrows.level(held, net.minecraft.world.item.enchantment.Enchantments.FIRE_ASPECT));
+		int knockback = Math.min(3, SkyArrows.level(held, net.minecraft.world.item.enchantment.Enchantments.KNOCKBACK));
+		return sharpness | smite << 3 | bane << 6 | fire << 9 | knockback << 11;
+	}
 
 	/** Infinity and Multishot on the Skyrim bow in hand (Minecraft's enchanting table): Skyrim acts them out (SkyrimShots). */
 	private static void tellBowEnchantments(LocalPlayer player) {
