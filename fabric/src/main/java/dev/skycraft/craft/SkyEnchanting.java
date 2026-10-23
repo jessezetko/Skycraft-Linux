@@ -464,10 +464,16 @@ public final class SkyEnchanting {
 		if (caster == null) {
 			return;
 		}
-		// TODO(SkyCraft+): fill one of the player's empty Skyrim soul gems (needs a Skyrim-side request); for now the soul
-		// is experience, as much again as the mob gives.
-		int xp = Math.max(5, (int) (entity.getMaxHealth() / 2.0F));
-		net.minecraft.world.entity.ExperienceOrb.award(level, entity.position(), xp);
+		// Its soul fills one of the player's empty Skyrim soul gems (by the mob's health: petty .. grand); a guest's (no
+		// Skyrim of the host's to fill) is experience instead, as much again as the mob gives.
+		if (SkyNet.isHost(caster) && SkyLink.active()) {
+			float health = entity.getMaxHealth();
+			int soul = health <= 10.0F ? 1 : health <= 20.0F ? 2 : health <= 40.0F ? 3 : health <= 100.0F ? 4 : 5;
+			SkyLink.pushEvent(Proto.EV_SOUL_TRAPPED, 0, 0.0F, 0.0F, 0.0F, 0.0F, soul);
+		} else {
+			int xp = Math.max(5, (int) (entity.getMaxHealth() / 2.0F));
+			net.minecraft.world.entity.ExperienceOrb.award(level, entity.position(), xp);
+		}
 		level.sendParticles(net.minecraft.core.particles.ParticleTypes.SOUL, entity.getX(), entity.getY() + entity.getBbHeight() / 2.0, entity.getZ(), 12, 0.3, 0.4, 0.3, 0.05);
 		caster.sendOverlayMessage(Component.literal(entity.getName().getString() + "'s soul captured"));
 	}

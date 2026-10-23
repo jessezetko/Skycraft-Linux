@@ -275,6 +275,45 @@ namespace skycraft::Workbench
 		logger::info("workbench: {} placed", base->GetName());
 	}
 
+	// SkyCraft+ : soul trap on a Minecraft mob (kEvSoulTrapped). The smallest empty soul gem the player carries that holds a
+	// soul this size becomes its filled one (the filled gem links back to the empty, as Skyrim's do).
+	void SoulTrapped(RE::PlayerCharacter* a_player, std::uint32_t a_soul)
+	{
+		auto* handler = RE::TESDataHandler::GetSingleton();
+		if (!a_player || !handler || a_soul == 0) {
+			return;
+		}
+		RE::TESSoulGem* empty = nullptr;
+		for (const auto& [item, data] : a_player->GetInventory()) {
+			auto* gem = item ? item->As<RE::TESSoulGem>() : nullptr;
+			if (!gem || data.first <= 0 || gem->GetContainedSoul() != RE::SOUL_LEVEL::kNone || static_cast<std::uint32_t>(gem->GetMaximumCapacity()) < a_soul) {
+				continue;
+			}
+			if (!empty || gem->GetMaximumCapacity() < empty->GetMaximumCapacity()) {
+				empty = gem;
+			}
+		}
+		if (!empty) {
+			logger::info("soul trap: no empty soul gem big enough for a size {} soul", a_soul);
+			return;
+		}
+		RE::TESSoulGem* filled = nullptr;
+		for (auto* gem : handler->GetFormArray<RE::TESSoulGem>()) {
+			if (gem && gem->linkedSoulGem == empty && gem->GetContainedSoul() == empty->GetMaximumCapacity()) {
+				filled = gem;
+				break;
+			}
+		}
+		if (!filled) {
+			logger::info("soul trap: {} has no filled kind", empty->GetName());
+			return;
+		}
+		a_player->RemoveItem(empty, 1, RE::ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
+		a_player->AddObjectToContainer(filled, nullptr, 1, nullptr);
+		RE::SendHUDMessage::ShowHUDMessage("Soul captured!");
+		logger::info("soul trap: a Minecraft mob's soul filled {}", empty->GetName());
+	}
+
 	// Classifies a magic effect the way Minecraft acts it out (SkyEnchanting on the Minecraft side).
 	const char* EffectKind(RE::EffectSetting* a_effect)
 	{

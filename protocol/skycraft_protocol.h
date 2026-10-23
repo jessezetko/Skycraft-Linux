@@ -13,7 +13,7 @@
 namespace skycraft::proto
 {
 	inline constexpr std::uint32_t kMagic = 0x43594B53;  // "SKYC"
-	inline constexpr std::uint32_t kVersion = 62;  // SkyCraft+ : v50, KotIsOff's atlas in bands (kRenAtlasChunk); v51, Skyrim mode's collision and lock-on (kWeMob, kSkySkyrimControl); v52, kSkyItemDestroy; v53, taming and feeding (kEvTame, kEvGrowBaby, kActorTamed); v54, Minecraft's things at Skyrim's workbenches (SkyState::workbench, kStoreLendGear/kStoreReturnGear, kEvEnchantHit); v55, arrows across the games (kShotArrow), Skyrim mode's Activate (McState::useDistance); v56, the SkyCraft+ settings screen (SkySettingsText, SettingsEdit); v57, every shout in Minecraft mode (kShotParalyze..kShotWither, SkyrimShot::seconds, SkyState::selfEffects); v58, Skyrim geo (kRenSkyrimTexture, kStoreTextureAt, kSkyGeo); v59, beds (kEvSlept, kEvGoToBed), bow enchantments (kEvBowEnchants); v60, Minecraft arrows on the Skyrim bow (kEvBowEnchants flag 4); v61, kShotLent, Skyrim arrows from a Minecraft bow (kWeSkyrimArrow), Skyrim blocks' item pictures (kStoreTexturePicture); v62, Skyrim music discs (kEvJukebox), Skyrim's workbenches taken and placed (kDigWorkbench, kStoreTakeWorkbench, kEvPlaceWorkbench), the Overworld Portal's world (kDimOverworld, kMcInVillage)
+	inline constexpr std::uint32_t kVersion = 62;  // SkyCraft+ : v50, KotIsOff's atlas in bands (kRenAtlasChunk); v51, Skyrim mode's collision and lock-on (kWeMob, kSkySkyrimControl); v52, kSkyItemDestroy; v53, taming and feeding (kEvTame, kEvGrowBaby, kActorTamed); v54, Minecraft's things at Skyrim's workbenches (SkyState::workbench, kStoreLendGear/kStoreReturnGear, kEvEnchantHit); v55, arrows across the games (kShotArrow), Skyrim mode's Activate (McState::useDistance); v56, the SkyCraft+ settings screen (SkySettingsText, SettingsEdit); v57, every shout in Minecraft mode (kShotParalyze..kShotWither, SkyrimShot::seconds, SkyState::selfEffects); v58, Skyrim geo (kRenSkyrimTexture, kStoreTextureAt, kSkyGeo); v59, beds (kEvSlept, kEvGoToBed), bow enchantments (kEvBowEnchants); v60, Minecraft arrows on the Skyrim bow (kEvBowEnchants flag 4); v61, kShotLent, Skyrim arrows from a Minecraft bow (kWeSkyrimArrow), Skyrim blocks' item pictures (kStoreTexturePicture); v62, Skyrim music discs (kEvJukebox), soul trap on Minecraft mobs (kEvSoulTrapped), Skyrim's workbenches taken and placed (kDigWorkbench, kStoreTakeWorkbench, kEvPlaceWorkbench), the Overworld Portal's world (kDimOverworld, kMcInVillage)
 	inline constexpr wchar_t       kMappingName[] = L"Local\\SkyCraft_v1";
 
 	// 1 Minecraft block == 70 Skyrim units (Skyrim player ~128 units tall, MC player 1.8 blocks).
@@ -469,6 +469,8 @@ namespace skycraft::proto
 		                     // flags its index + 1 in MusicDiscs (SkyMusicDiscs.DISCS on Minecraft's side), 0 it stopped
 		kEvPlaceWorkbench = 23,  // SkyCraft+ (v62): a Skyrim workbench item placed: formId (the furniture) stands at a/b/c (MC
 		                         // coords, its foot), facing d (MC degrees), kept in the save
+		kEvSoulTrapped = 24,     // SkyCraft+ (v62): a Minecraft mob died soul-trapped by the player: one of their empty soul gems
+		                         // that holds it is filled (flags: the soul's size, 1 petty .. 5 grand)
 	};
 
 	// SkyCraft+ : what a click on a Skyrim item does (McEvent::flags of kEvSkyItem).
