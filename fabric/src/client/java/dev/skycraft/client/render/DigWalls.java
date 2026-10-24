@@ -47,9 +47,52 @@ final class DigWalls {
 		// neighbour cell is within it), not for each face.
 		List<SkyTri> near = new ArrayList<>();
 		dev.skycraft.world.SkyCollision.originalSurfacesNear(SkyDig.Probe.reach(sx * 16 - 1, sy * 16 - 1, sz * 16 - 1, sx * 16 + 17, sy * 16 + 17, sz * 16 + 17), near);
-		SkyDig.Probe probe = new SkyDig.Probe().from(near);
-		Emitter emit = new Emitter(sx, sy, sz, out);
+		// SkyCraft+ : structure loading. The walls again as last made, if nothing they're made from has changed
+		// (which cells are dug, which round them are solid, Skyrim's surfaces near): a structure being placed
+		// had the same sections meshed again and again, their walls worked out anew each time (tens of ms).
 		BlockPos.MutableBlockPos cell = new BlockPos.MutableBlockPos();
+		BlockPos.MutableBlockPos next = new BlockPos.MutableBlockPos();
+		long inputs = dev.skycraft.world.SkyCollision.epoch() * 31L + near.size();
+		for (int word = 0; word < 64; word++) {
+			long bits = dug[word];
+			while (bits != 0) {
+				int bit = word * 64 + Long.numberOfTrailingZeros(bits);
+				bits &= bits - 1;
+				int x = sx * 16 + (bit & 15), y = sy * 16 + (bit >> 8), z = sz * 16 + ((bit >> 4) & 15);
+				boolean solid = level.getBlockState(cell.set(x, y, z)).isSolidRender();
+				inputs = inputs * 31L + bit * 3L + (solid ? 1 : 2);
+				if (!solid) {
+					for (Direction dir : WALLS) {
+						int nx = x + dir.getStepX(), ny = y + dir.getStepY(), nz = z + dir.getStepZ();
+						inputs = inputs * 31L + (lookup.isDug(nx, ny, nz) ? 1 : 0) + (level.getBlockState(next.set(nx, ny, nz)).isSolidRender() ? 2 : 0);
+					}
+				}
+			}
+		}
+		long sectionKey = net.minecraft.core.SectionPos.asLong(sx, sy, sz);
+		Made made = MADE.getAndMoveToLast(sectionKey);
+		if (made != null && made.inputs == inputs) {
+			int lx = Integer.MIN_VALUE, ly = 0, lz = 0, light = 0;
+			for (Quad q : made.quads) {
+				if (q.x != lx || q.y != ly || q.z != lz) {
+					lx = q.x;
+					ly = q.y;
+					lz = q.z;
+					cell.set(lx, ly, lz);
+					light = LightCoordsUtil.pack(level.getBrightness(LightLayer.BLOCK, cell), level.getBrightness(LightLayer.SKY, cell));
+				}
+				out.quad(q.xyz, q.uv, light, q.normal);
+			}
+			return;
+		}
+		List<Quad> quads = new ArrayList<>();
+		int[] at = new int[3];
+		Out recording = (xyz, uv, light, normal) -> {
+			quads.add(new Quad(xyz.clone(), uv.clone(), normal, at[0], at[1], at[2]));
+			out.quad(xyz, uv, light, normal);
+		};
+		SkyDig.Probe probe = new SkyDig.Probe().from(near);
+		Emitter emit = new Emitter(sx, sy, sz, recording);
 		for (int word = 0; word < 64; word++) {
 			long bits = dug[word];
 			while (bits != 0) {
@@ -63,6 +106,9 @@ final class DigWalls {
 					continue; // a solid block fills the dug cell: nothing to see from in it
 				}
 				emit.light = LightCoordsUtil.pack(level.getBrightness(LightLayer.BLOCK, cell), level.getBrightness(LightLayer.SKY, cell));
+				at[0] = x;
+				at[1] = y;
+				at[2] = z;
 				for (Direction dir : WALLS) {
 					int nx = x + dir.getStepX(), ny = y + dir.getStepY(), nz = z + dir.getStepZ();
 					if (lookup.isDug(nx, ny, nz) || level.getBlockState(new BlockPos(nx, ny, nz)).isSolidRender()) {
@@ -83,6 +129,24 @@ final class DigWalls {
 				}
 			}
 		}
+		MADE.putAndMoveToLast(sectionKey, new Made(inputs, quads));
+		while (MADE.size() > 1024) {
+			MADE.removeFirst();
+		}
+	}
+
+	/** SkyCraft+ : structure loading. A section's walls as last made: what they were made from, and their quads (by dug cell). */
+	private record Quad(float[] xyz, float[] uv, Direction normal, int x, int y, int z) {
+	}
+
+	private record Made(long inputs, List<Quad> quads) {
+	}
+
+	private static final it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap<Made> MADE = new it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap<>();
+
+	/** The atlas was made again (its places may have moved): walls are made anew. */
+	static void forgetMade() {
+		MADE.clear();
 	}
 
 	/** Collects polygons for one face and emits them with the right texture. */

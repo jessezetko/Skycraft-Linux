@@ -386,6 +386,7 @@ public final class WorldExporter {
 		SkyGeoTextures.atlasSent(atlas);  // SkyCraft+ : Skyrim geo (its textures drawn into the new atlas)
 		SENT.clear();
 		BARE.clear();
+		DigWalls.forgetMade();
 		LIT.clear();
 		SOLID.clear();
 		SHAPED.clear();
