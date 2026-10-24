@@ -1414,6 +1414,27 @@ namespace skycraft
 			static float before = -1.0f;
 			const float  want = State().overworldTimeScale;
 			auto*        scale = RE::TESForm::LookupByID<RE::TESGlobal>(0x3A);  // TimeScale
+			// The waiting cell's own colours (its haze and the backdrop behind Minecraft's blocks) with the hour too:
+			// set once, light blue, it looked like day at 3 am.
+			if (a_there) {
+				auto* cell = RE::TESForm::LookupByID<RE::TESObjectCELL>(State().waitingCellId);
+				auto* lighting = cell ? cell->GetLighting() : nullptr;
+				auto* calendar = RE::Calendar::GetSingleton();
+				if (lighting && calendar) {
+					const float hour = calendar->GetHour();
+					const float day = hour >= 7.0f && hour <= 19.0f ? 1.0f
+						: hour >= 5.0f && hour < 7.0f ? 0.15f + 0.85f * (hour - 5.0f) / 2.0f
+						: hour > 19.0f && hour <= 21.0f ? 0.15f + 0.85f * (21.0f - hour) / 2.0f : 0.15f;
+					auto shade = [&](int a_r, int a_g, int a_b, int a_nr, int a_ng, int a_nb) {
+						return RE::Color(static_cast<std::uint8_t>(a_nr + (a_r - a_nr) * day), static_cast<std::uint8_t>(a_ng + (a_g - a_ng) * day),
+							static_cast<std::uint8_t>(a_nb + (a_b - a_nb) * day), 0);
+					};
+					lighting->fogColorNear = shade(150, 190, 255, 8, 12, 28);
+					lighting->fogColorFar = lighting->fogColorNear;
+					lighting->ambient = shade(120, 120, 120, 30, 32, 44);
+					lighting->directional = shade(255, 248, 230, 40, 44, 70);
+				}
+			}
 			if (!scale || want <= 0.0f) {
 				return;
 			}
