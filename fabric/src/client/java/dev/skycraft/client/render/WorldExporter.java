@@ -379,6 +379,11 @@ public final class WorldExporter {
 		int meshed = 0;
 		long now = System.nanoTime();
 		for (int i = 0; i < order.length && meshed < SECTIONS_PER_FRAME && System.nanoTime() < deadline; i++) {
+			// SkyCraft+ : structure loading. Skyrim behind on what it was sent: the rest next frame
+			// (meshed into a full ring, each section's write waited up to a second for room).
+			if (SkyLink.renderFree() < RING_ROOM) {
+				break;
+			}
 			long key = order[i];
 			synchronized (DIRTY) {
 				// SkyCraft+ : structure loading. A section meshed moments ago waits a little before it's
@@ -409,6 +414,8 @@ public final class WorldExporter {
 	/** SkyCraft+ : structure loading. When each section was last meshed (see meshDirtySections). */
 	private static final it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap MESHED_AT = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
 	private static final long REMESH_AFTER_NANOS = 400_000_000L;
+	/** SkyCraft+ : structure loading. Room left in the render ring below which no more is meshed this frame. */
+	private static final long RING_ROOM = 8L << 20;
 	/** SkyCraft+ : performance. Where a slow section's time went (the parts meshSection counts). */
 	private static long partColumns, partBlocks, partWalls, partSend;
 	private static int slowSections;

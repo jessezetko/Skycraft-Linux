@@ -573,6 +573,23 @@ public final class SkyDig {
 		// thousands, nearly all far from any one point; kept in this.tris's order (ties go the same way).
 		private final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<List<SkyTri>> nearCells = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
 
+		// SkyCraft+ : structure loading. Surfaces gathered once round a bigger box (a section's dug
+		// walls): each box's are picked from these instead of Skyrim's regions (the same ones, in the
+		// same order). Searching the regions for each face of each dug cell took a structure's
+		// section hundreds of ms.
+		private @Nullable List<SkyTri> source;
+
+		/** What {@link #around} gathers from for a box: the box grown by the search reach (and the land's above). */
+		public static AABB reach(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
+			return new AABB(minX - SEARCH, minY - SEARCH, minZ - SEARCH, maxX + SEARCH, maxY + SEARCH + LAND_REACH, maxZ + SEARCH);
+		}
+
+		/** Gathers from these (originalSurfacesNear over a reach holding every later box) from now on; null: Skyrim's regions. */
+		public Probe from(@Nullable List<SkyTri> source) {
+			this.source = source;
+			return this;
+		}
+
 		/** Gathers the surfaces around a box (MC coords) once, for many tests inside it. */
 		public Probe around(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
 			this.gathered.clear();
@@ -588,7 +605,16 @@ public final class SkyDig {
 			this.boxMaxY = maxY;
 			this.boxMaxZ = maxZ;
 			// The land well above too: a point deep under it is still under it.
-			SkyCollision.originalSurfacesNear(new AABB(minX - SEARCH, minY - SEARCH, minZ - SEARCH, maxX + SEARCH, maxY + SEARCH + LAND_REACH, maxZ + SEARCH), this.gathered);
+			AABB box = reach(minX, minY, minZ, maxX, maxY, maxZ);
+			if (this.source == null) {
+				SkyCollision.originalSurfacesNear(box, this.gathered);
+			} else {
+				for (SkyTri t : this.source) {
+					if (t.maxX >= box.minX && t.minX <= box.maxX && t.maxY >= box.minY && t.minY <= box.maxY && t.maxZ >= box.minZ && t.minZ <= box.maxZ) {
+						this.gathered.add(t);
+					}
+				}
+			}
 			for (SkyTri t : this.gathered) {
 				if (t.stairHelper) {
 					continue;

@@ -43,7 +43,11 @@ final class DigWalls {
 
 	/** Adds the walls around the dug cells of one section (bits: x + 16z + 256y). */
 	static void add(ClientLevel level, int sx, int sy, int sz, long[] dug, SkyDig.DugLookup lookup, Faces faces, Out out) {
-		SkyDig.Probe probe = new SkyDig.Probe();
+		// SkyCraft+ : structure loading. Skyrim's surfaces round the section gathered once (every
+		// neighbour cell is within it), not for each face.
+		List<SkyTri> near = new ArrayList<>();
+		dev.skycraft.world.SkyCollision.originalSurfacesNear(SkyDig.Probe.reach(sx * 16 - 1, sy * 16 - 1, sz * 16 - 1, sx * 16 + 17, sy * 16 + 17, sz * 16 + 17), near);
+		SkyDig.Probe probe = new SkyDig.Probe().from(near);
 		Emitter emit = new Emitter(sx, sy, sz, out);
 		BlockPos.MutableBlockPos cell = new BlockPos.MutableBlockPos();
 		for (int word = 0; word < 64; word++) {

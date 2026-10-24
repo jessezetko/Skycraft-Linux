@@ -620,8 +620,16 @@ namespace skycraft
 		auto*      data = ring + proto::kRenRingDataOff;
 		constexpr auto size = proto::kRenRingDataBytes;
 		std::uint64_t  done = 0;
+		// A long backlog drains faster: kept to a_maxMs with the ring well filled (a dense world of
+		// Minecraft's own), Minecraft waited on it for room, a second at each of its sections.
+		double budget = a_maxMs;
+		if (budget > 0.0 && head - tail > size * 3 / 4) {
+			budget = 0.0;
+		} else if (budget > 0.0 && head - tail > size / 2) {
+			budget = (std::max)(budget, 14.0);
+		}
 		while (tail < head && done < a_maxBytes) {
-			if (a_maxMs > 0.0 && done > 0 && std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() > a_maxMs) {
+			if (budget > 0.0 && done > 0 && std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() > budget) {
 				break;  // the rest next frame (a structure coming in sent a frame's worth of sections at once: a hitch)
 			}
 			const auto pos = tail % size;

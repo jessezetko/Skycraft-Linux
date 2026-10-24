@@ -1064,6 +1064,20 @@ public final class SkyLink {
 		return writeRender(type, header, body, 500);
 	}
 
+	/**
+	 * SkyCraft+ : structure loading. Bytes free in the render ring now (0 unlinked). Sections wait for
+	 * room rather than meshed into a full ring: each write then waited a second for Skyrim to read.
+	 */
+	public static long renderFree() {
+		MemorySegment s = shm;
+		if (s == null) {
+			return 0L;
+		}
+		long head = s.get(JAVA_LONG, OFF_RENDER_RING + RR_HEAD);
+		long tail = (long) LONG.getAcquire(s, OFF_RENDER_RING + RR_TAIL);
+		return RR_DATA_BYTES - (head - tail);
+	}
+
 	/** Like writeRender, but gives up at once if the ring is full (per-frame data that the next frame replaces). */
 	public static boolean tryWriteRender(int type, java.nio.ByteBuffer header, java.nio.ByteBuffer body) {
 		return writeRender(type, header, body, 1);
