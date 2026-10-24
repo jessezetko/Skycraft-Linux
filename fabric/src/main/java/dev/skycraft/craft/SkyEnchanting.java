@@ -399,9 +399,25 @@ public final class SkyEnchanting {
 			Spell spell = entry.getValue();
 			if (!mob.isAlive() || mob.level().getGameTime() >= spell.until()) {
 				it.remove();
+				// Its own goals back (Minecraft would put them back within a few ticks anyway).
+				for (var flag : new net.minecraft.world.entity.ai.goal.Goal.Flag[] { net.minecraft.world.entity.ai.goal.Goal.Flag.MOVE,
+					net.minecraft.world.entity.ai.goal.Goal.Flag.LOOK, net.minecraft.world.entity.ai.goal.Goal.Flag.JUMP }) {
+					mob.getGoalSelector().enableControlFlag(flag);
+				}
 				continue;
 			}
 			ServerPlayer caster = server.getPlayerList().getPlayer(spell.caster());
+			// SkyCraft+ : enchanting across the games. Feared or paralyzed, its own goals that move it
+			// (chasing, attacking, aiming) don't run: dropping its target alone, it took the player
+			// again the next tick and came straight back. (Minecraft turns them on again every few
+			// ticks, after its goals have run: so turned off each tick.)
+			if (spell.kind().equals("fear") || spell.kind().equals("paralyze")) {
+				mob.getGoalSelector().disableControlFlag(net.minecraft.world.entity.ai.goal.Goal.Flag.MOVE);
+				mob.getGoalSelector().disableControlFlag(net.minecraft.world.entity.ai.goal.Goal.Flag.LOOK);
+				if (spell.kind().equals("paralyze")) {
+					mob.getGoalSelector().disableControlFlag(net.minecraft.world.entity.ai.goal.Goal.Flag.JUMP);
+				}
+			}
 			switch (spell.kind()) {
 				case "paralyze" -> {
 					// Frozen: no moving, no aiming, no attacking (its AI keeps running, so nothing sticks once it wears off).
