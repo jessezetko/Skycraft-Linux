@@ -35,9 +35,7 @@ namespace skycraft::MinecraftEnemies
 			double              floor = 0.0;     // Minecraft y it last stood at, alive
 			float               deadFor = 0.0f;
 			bool                laidDown = false;  // its body held where it fell
-			bool                peaceful = false;  // SkyCraft+ : the Overworld's animals and travellers: not set on the player; they wander
-			double              wanderX = 0.0, wanderZ = 0.0;  // where it's ambling to (MC coords)
-			float               wanderFor = 0.0f;  // seconds till it picks somewhere else
+			bool                peaceful = false;  // SkyCraft+ : the Overworld's animals and travellers: not set on the player; they stand and idle (moved by hand every frame, with no navmesh to walk, they shook and slid without walking)
 		};
 		std::vector<Spawned> spawned;
 
@@ -159,6 +157,11 @@ namespace skycraft::MinecraftEnemies
 		}
 
 		/** Ground a body fits on near the player: a solid block, and three free above it. */
+		// SkyCraft+ : the Overworld Portal's world. Its sea, rivers and most lakes have their surface at sea level
+		// (63): nothing stands lower there (Skyrim's side doesn't know Minecraft's water: they came in on lakebeds
+		// and stayed under). Elsewhere no floor.
+		double spotFloor = -1.0e9;
+
 		bool FindSpot(double a_x, double a_y, double a_z, RE::NiPoint3& a_out)
 		{
 			for (int tries = 0; tries < 24; ++tries) {
@@ -167,7 +170,7 @@ namespace skycraft::MinecraftEnemies
 				const int   x = int(std::floor(a_x + std::cos(angle) * distance));
 				const int   z = int(std::floor(a_z + std::sin(angle) * distance));
 				const int   top = int(std::floor(a_y)) + 8;
-				for (int y = top; y >= top - 20; --y) {
+				for (int y = top; y >= top - 20 && y >= spotFloor; --y) {
 					if (NpcBlocks::SolidAt(x, y - 1, z) && !NpcBlocks::BlocksBody(x, y, z) && !NpcBlocks::BlocksBody(x, y + 1, z) &&
 						!NpcBlocks::BlocksBody(x, y + 2, z)) {
 						a_out = McToSky(x + 0.5, y, z + 0.5);
@@ -212,38 +215,6 @@ namespace skycraft::MinecraftEnemies
 		 * has stood still a moment, it's walked straight at the player over Minecraft's blocks (up a
 		 * one-block step; not into walls).
 		 */
-		// SkyCraft+ : one of the Overworld's animals or travellers not fighting ambles about (no navmesh: walked by hand).
-		void Wander(Spawned& a_s, RE::Actor* a_actor, float a_delta)
-		{
-			const auto here = SkyToMc(a_actor->GetPosition());
-			if ((a_s.wanderFor -= a_delta) <= 0.0f) {
-				a_s.wanderFor = Uniform(6.0f, 14.0f);
-				const bool rest = Uniform(0.0f, 1.0f) < 0.4f;
-				const float angle = Uniform(0.0f, 6.2831853f), reach = Uniform(3.0f, 9.0f);
-				a_s.wanderX = rest ? here.x : here.x + std::cos(angle) * reach;
-				a_s.wanderZ = rest ? here.z : here.z + std::sin(angle) * reach;
-			}
-			const double dx = a_s.wanderX - here.x, dz = a_s.wanderZ - here.z;
-			const double distance = std::sqrt(dx * dx + dz * dz);
-			if (distance < 0.3) {
-				return;
-			}
-			const double step = std::min<double>(1.6 * a_delta, distance);
-			const double nx = here.x + dx / distance * step, nz = here.z + dz / distance * step;
-			const int    bx = int(std::floor(nx)), bz = int(std::floor(nz)), by = int(std::floor(here.y + 0.05));
-			double       ny = here.y;
-			if (NpcBlocks::BlocksBody(bx, by, bz) || NpcBlocks::BlocksBody(bx, by + 1, bz)) {
-				if (NpcBlocks::BlocksBody(bx, by + 1, bz) || NpcBlocks::BlocksBody(bx, by + 2, bz)) {
-					a_s.wanderFor = 0.0f;  // a wall: somewhere else
-					return;
-				}
-				ny = by + 1.0;
-			}
-			a_actor->SetPosition(McToSky(nx, ny, nz), true);
-			a_s.last = a_actor->GetPosition();
-			a_actor->data.angle.z = std::atan2(float(dx), float(-dz));
-		}
-
 		void Steer(RE::PlayerCharacter* a_player, Spawned& a_s, RE::Actor* a_actor, float a_delta)
 		{
 			const auto pos = a_actor->GetPosition();
@@ -251,9 +222,6 @@ namespace skycraft::MinecraftEnemies
 			a_s.last = pos;
 			if (!a_actor->IsInCombat()) {
 				a_s.still = 0.0f;
-				if (a_s.peaceful) {
-					Wander(a_s, a_actor, a_delta);
-				}
 				return;
 			}
 			const auto  here = SkyToMc(pos);
@@ -271,6 +239,9 @@ namespace skycraft::MinecraftEnemies
 				return;
 			}
 			const double step = std::min<double>(kStepBlocks * a_delta, distance - keep);
+			if (here.y < spotFloor) {
+				return;  // (SkyCraft+ : not walked on under the Overworld's water)
+			}
 			const double nx = here.x + dx / distance * step, nz = here.z + dz / distance * step;
 			const int    bx = int(std::floor(nx)), bz = int(std::floor(nz)), by = int(std::floor(here.y + 0.05));
 			double       ny = here.y;
@@ -317,6 +288,7 @@ namespace skycraft::MinecraftEnemies
 		if (!here || a_player->IsDead()) {
 			return;
 		}
+		spotFloor = overworld ? 63.0 : -1.0e9;
 		// Keep the living, near ones; the dead stay where they fell (lootable) until the player leaves.
 		int alive = 0;
 		const auto me = a_player->GetPosition();
@@ -395,10 +367,15 @@ namespace skycraft::MinecraftEnemies
 				auto*       calendar = RE::Calendar::GetSingleton();
 				const float hour = calendar ? calendar->GetHour() : 12.0f;
 				const bool  night = hour < 6.0f || hour >= 20.0f;
-				if (night) {
+				// (Its people only about villages, never out in the wild; no predators in a village.)
+				if (a_inVillage) {
+					if (Uniform(0.0f, 1.0f) < (night ? 0.3f : 0.7f)) {
+						Spawn(a_player, st.overworldVillage, a_x, a_y, a_z, true);
+					}
+				} else if (night) {
 					Spawn(a_player, st.overworldNight, a_x, a_y, a_z);
 				} else {
-					Spawn(a_player, a_inVillage && Uniform(0.0f, 1.0f) < 0.6f ? st.overworldVillage : st.overworldDay, a_x, a_y, a_z, true);
+					Spawn(a_player, st.overworldDay, a_x, a_y, a_z, true);
 				}
 			} else if (alive < st.enemyCap) {
 				Spawn(a_player, a_world == proto::kDimNether ? st.netherEnemies : st.endEnemies, a_x, a_y, a_z);
