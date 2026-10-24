@@ -457,7 +457,7 @@
         {
           "type": "minecraft:tag",
           "expand": true,
-          "name": "skycraft:skyrim_music_discs",
+          "items": "#skycraft:skyrim_music_discs",
           "weight": 1
         },
         {
