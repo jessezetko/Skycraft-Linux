@@ -16,11 +16,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * A jukebox playing a Skyrim music disc (SkyMusicDiscs) has Skyrim play that song there (Minecraft
  * has no sound of its own here); it stopping (the disc taken out, the jukebox broken, the song
- * over) stops it in Skyrim too. Every jukebox's stop is told: Skyrim ignores one it isn't playing.
+ * over) stops it in Skyrim too. Every jukebox's stop is told: Skyrim ignores one it isn't playing. Play is told
+ * after Minecraft's own (it stops the jukebox's old song first; told before, Skyrim's new one stopped at once).
  */
 @Mixin(net.minecraft.client.renderer.LevelEventHandler.class)
 public abstract class LevelEventHandlerJukeboxMixin {
-	@Inject(method = "playJukeboxSong", at = @At("HEAD"))
+	@Inject(method = "playJukeboxSong", at = @At("RETURN"))
 	private void skycraft$play(Holder<JukeboxSong> song, BlockPos pos, CallbackInfo ci) {
 		int disc = song.unwrapKey().map(SkyMusicDiscs::indexOf).orElse(-1);
 		if (disc >= 0 && SkyClient.linked() && dev.skycraft.SkySettings.flag("skyrimMusicDiscs", true)) {
