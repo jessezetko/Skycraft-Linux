@@ -52,6 +52,12 @@ public abstract class BoatSkyrimWaterMixin {
 		return height >= 0.0F ? height : original.call(state, level, pos);
 	}
 
+	/** Up small falls in Skyrim's rivers (SkyBoats.climb). */
+	@Inject(method = "tick", at = @At("TAIL"))
+	private void skycraft$climb(CallbackInfo ci) {
+		SkyBoats.climb((AbstractBoat) (Object) this);
+	}
+
 	@Inject(method = "tick", at = @At("HEAD"), cancellable = true)
 	private void skycraft$holdOutOfReach(CallbackInfo ci) {
 		AbstractBoat boat = (AbstractBoat) (Object) this;
