@@ -1207,13 +1207,18 @@ namespace skycraft
 			// still reported while the open world loaded, and taken for where it came out (Skyrim's
 			// player went to the Nether's coordinates, in the air). It has to have moved from there.
 			static double awayX = 0.0, awayZ = 0.0;
+			// SkyCraft+ : the Overworld Portal. Its world shares Skyrim's x and z: the height tells them apart.
+			// And the highest Minecraft's player has been since it came back: where it came out, before
+			// Skyrim's ground had loaded under it (it fell meanwhile, and Skyrim's went down after it).
+			static double awayY = 0.0, highY = -1.0e9;
 			// SkyCraft+ : back into the same place. Where Skyrim's player was when it went to wait: a
 			// walled city's worldspace (Whiterun...), another worldspace, or an interior.
 			static RE::FormID   leftWorld = 0, leftCell = 0;
 			static RE::NiPoint3 leftPos;
 			static float  sinceBack = 0.0f;
 			if (world >= proto::kDimNether) {
-				awayX = mc.x, awayZ = mc.z;
+				awayX = mc.x, awayY = mc.y, awayZ = mc.z;
+				highY = -1.0e9;
 				sinceBack = 0.0f;
 			}
 			if (!parked || world > proto::kDimWorldspaces) {
@@ -1312,9 +1317,10 @@ namespace skycraft
 			if (parked && world <= proto::kDimWorldspaces) {
 				sinceBack += a_delta;
 				const double adx = mc.x - awayX, adz = mc.z - awayZ;
-				if (adx * adx + adz * adz < 4.0 && sinceBack < 20.0f) {
+				if (adx * adx + adz * adz < 4.0 && std::fabs(mc.y - awayY) < 2.0 && sinceBack < 20.0f) {
 					return parked;  // still the Nether's (or End's) position: its new one hasn't come
 				}
+				highY = (std::max)(highY, mc.y);
 				// Still across (not up and down: one falling, with no Skyrim ground under it yet, never
 				// stood still, Skyrim waited on in its empty cell and the player fell out of the world),
 				// for a second; or four seconds back, whatever it's doing.
@@ -1336,7 +1342,7 @@ namespace skycraft
 				// from, if Minecraft's player came back to that kind of place near where it left: out of a
 				// portal built in Whiterun, Tamriel's own (low, no collision) Whiterun was loaded instead
 				// and the player fell through it.
-				const auto    pos = McToSky(mc.x, mc.y, mc.z);
+				const auto    pos = McToSky(mc.x, (std::max)(mc.y, highY), mc.z);
 				RE::TESObjectCELL*  intoCell = nullptr;
 				RE::TESWorldSpace*  into = nullptr;
 				const bool          nearLeft = pos.GetDistance(leftPos) < 400.0f * float(proto::kUnitsPerBlock);

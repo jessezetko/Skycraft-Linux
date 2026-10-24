@@ -195,9 +195,12 @@ public final class SkyOverworld extends NetherPortalBlock {
 			return null;
 		}
 		if (level.dimension() == OVERWORLD) {
-			// Back to where they left Skyrim's world.
+			// Back to where they left Skyrim's world: into the portal they left by, else where it stood.
 			ServerLevel back = SkyMinecraftWorlds.leftLevel(player);
-			TeleportTransition there = back == null ? null : SkyMinecraftWorlds.whereTheyLeft(player, back);
+			TeleportTransition there = back == null ? null : SkyMinecraftWorlds.intoOverworldPortalLeftBy(player, back);
+			if (there == null && back != null) {
+				there = SkyMinecraftWorlds.whereTheyLeft(player, back);
+			}
 			if (there == null && back != null) {
 				BlockPos spawn = back.getRespawnData().pos();
 				there = new TeleportTransition(back, Vec3.atBottomCenterOf(spawn), Vec3.ZERO, player.getYRot(), 0.0F, TeleportTransition.DO_NOTHING);

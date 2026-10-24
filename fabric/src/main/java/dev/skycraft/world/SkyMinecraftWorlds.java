@@ -138,6 +138,29 @@ public final class SkyMinecraftWorlds {
 	}
 
 	/**
+	 * SkyCraft+ : the Overworld Portal. Back from Minecraft's overworld: inside the dirt portal they left
+	 * Skyrim's world by, on its frame's floor, if it's still there; null if not. (Put where they last
+	 * stood instead, beside it, Skyrim's ground there wasn't loaded yet: they fell through it.)
+	 */
+	public static @Nullable TeleportTransition intoOverworldPortalLeftBy(ServerPlayer player, ServerLevel back) {
+		BlockPos at = player.getAttached(LEFT_AT);
+		if (at == null) {
+			return null;
+		}
+		BlockPos best = null;
+		for (BlockPos q : BlockPos.betweenClosed(at.offset(-2, -2, -2), at.offset(2, 3, 2))) {
+			if (back.getBlockState(q).is(SkyOverworld.PORTAL) && !back.getBlockState(q.below()).is(SkyOverworld.PORTAL) && (best == null || q.distSqr(at) < best.distSqr(at))) {
+				best = q.immutable();
+			}
+		}
+		if (best == null) {
+			return null;
+		}
+		SkyCraft.LOG.info("SkyCraft: back from Minecraft's overworld by the Overworld Portal at {}", best.toShortString());
+		return new TeleportTransition(back, Vec3.atBottomCenterOf(best), Vec3.ZERO, player.getYRot(), 0.0F, TeleportTransition.PLAY_PORTAL_SOUND);
+	}
+
+	/**
 	 * Back from the Nether when the portal they left by is gone: where it stood, not a new portal (the
 	 * mirror world has no Minecraft ground there, and one was made hanging in Skyrim's sky). Null
 	 * if they didn't leave the open world by a portal.
