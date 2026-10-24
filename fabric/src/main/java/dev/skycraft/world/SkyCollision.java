@@ -292,6 +292,11 @@ public final class SkyCollision {
 		return (v + 7) & ~7L;
 	}
 
+	/** SkyCraft+ : the collision epoch now (it changes each time Skyrim clears its collision). */
+	public static int epoch() {
+		return epoch;
+	}
+
 	/** A freshly started client joins whatever collision epoch Skyrim is already on. */
 	private static void adoptEpochIfFresh(int msgEpoch) {
 		if (epoch == -1) {

@@ -43,6 +43,7 @@ public final class SkyClient {
 	private static boolean teleportPending;
 	private static LocalPlayer lastPlayer;
 	private static Vec3 holdPos;
+	private static int holdEpoch = Integer.MIN_VALUE;  // SkyCraft+ : the collision epoch a long move waits to see change
 	private static long relinkedAt;  // SkyCraft+ : when the link last came back
 	private static int sentHands = -1; // SkyCraft+ : multiplayer (the guest's Skyrim hands, as last sent)
 	private static int sentSelf; // SkyCraft+ : every shout in Minecraft mode (the guest's, as last sent)
@@ -169,10 +170,17 @@ public final class SkyClient {
 			teleportPending = false;
 		}
 		if (teleportPending && sky.inGame() && !sky.loading()) {
+			// SkyCraft+ : a door with no loading screen (Whiterun's gate). Skyrim clears its collision a moment
+			// after such a move: what was still known of the place (from before) let the hold go at once,
+			// then went, and the player fell out of the world. A long move waits for that clear.
+			boolean far = minecraft.player != null && (dimensionFor(sky) != minecraft.player.level().dimension()
+				|| minecraft.player.position().distanceToSqr(sky.x, sky.y, sky.z) > 24.0 * 24.0);
 			requestTeleport(minecraft, sky.x, sky.y, sky.z, sky.yaw, sky.pitch);
 			teleportAck = sky.teleportSeq;
 			teleportPending = false;
 			holdPos = new Vec3(sky.x, sky.y, sky.z);
+			holdEpoch = far ? SkyCollision.epoch() : Integer.MIN_VALUE;
+			holdSince = 0;
 		}
 		// SkyCraft+ : interiors in multiplayer. A guest's request to change dimension sent too early
 		// (just joined) is lost: while its Skyrim is in another kind of world than its Minecraft, ask again.
@@ -621,6 +629,17 @@ public final class SkyClient {
 		if (inMinecraftWorld(minecraft) && sky.inGame() && !sky.loading()) {
 			holdPos = null; // SkyCraft+ : the Nether and the End are all Minecraft's blocks: nothing to wait for
 			return;
+		}
+		// SkyCraft+ : after a long move, nothing counts as known till Skyrim's collision has been cleared (or 3 s).
+		if (holdEpoch != Integer.MIN_VALUE) {
+			if (SkyCollision.epoch() != holdEpoch || System.currentTimeMillis() - holdSince > 3000) {
+				holdEpoch = Integer.MIN_VALUE;
+			} else {
+				player.setDeltaMovement(Vec3.ZERO);
+				player.setPos(holdPos.x, holdPos.y, holdPos.z);
+				player.resetFallDistance();
+				return;
+			}
 		}
 		int bx = (int) Math.floor(holdPos.x), by = (int) Math.floor(holdPos.y), bz = (int) Math.floor(holdPos.z);
 		boolean known = SkyCollision.isKnown(bx, by - 1, bz) && SkyCollision.isKnown(bx, by, bz)
