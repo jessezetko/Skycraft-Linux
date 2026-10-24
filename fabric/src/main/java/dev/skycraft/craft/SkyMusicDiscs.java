@@ -116,8 +116,13 @@ public final class SkyMusicDiscs {
 			ResourceKey<JukeboxSong> song = ResourceKey.create(Registries.JUKEBOX_SONG, id);
 			ITEMS.add(Registry.register(BuiltInRegistries.ITEM, key, new Item(new Item.Properties().setId(key).stacksTo(1).rarity(Rarity.RARE).jukeboxPlayable(song))));
 		}
-		net.fabricmc.fabric.api.creativetab.v1.CreativeModeTabEvents.modifyOutputEvent(net.minecraft.world.item.CreativeModeTabs.TOOLS_AND_UTILITIES)
-			.register(output -> ITEMS.forEach(output::accept));
+		// A creative tab of their own (at the end of Tools & Utilities, after Minecraft's discs, they weren't found).
+		Registry.register(BuiltInRegistries.CREATIVE_MODE_TAB, Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "skyrim_music_discs"),
+			net.fabricmc.fabric.api.creativetab.v1.FabricCreativeModeTab.builder()
+				.title(net.minecraft.network.chat.Component.literal("Skyrim Music Discs"))
+				.icon(() -> new net.minecraft.world.item.ItemStack(ITEMS.get(0)))
+				.displayItems((parameters, output) -> ITEMS.forEach(output::accept))
+				.build());
 	}
 
 	/** The disc whose song this is (its key's path is the disc's item id), or -1: not one of ours. */
