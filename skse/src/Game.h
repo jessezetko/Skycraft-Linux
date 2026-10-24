@@ -66,6 +66,7 @@ namespace skycraft
 		std::vector<RE::FormID>    overworldNight;
 		std::vector<RE::FormID>    overworldVillage;
 		bool                       skyrimModeInOverworld{ true };  // SkyCraft+ : K works there ([Worlds] bSkyrimModeInOverworld)
+		float                      overworldTimeScale{ 72.0f };    // SkyCraft+ : Skyrim's TimeScale there ([Worlds] fOverworldTimeScale; 0 leaves it)
 		int                        enemyCap{ 6 };
 		float                      enemySeconds{ 12.0f };
 		// SkyCraft+ : Minecraft's structures marked on Skyrim's map and compass ([Worlds] bStructureMarkers).
@@ -557,7 +558,7 @@ namespace skycraft
 		// A Skyrim workbench item placed (kEvPlaceWorkbench).
 		void          Place(RE::PlayerCharacter* a_player, RE::FormID a_furniture, float a_x, float a_y, float a_z, float a_yaw);
 		// Each frame: workbenches just placed turned to face whoever placed them, once their models have loaded.
-		void          PerFrame();
+		void          FacePlaced();
 		// A Minecraft mob died soul-trapped by the player: an empty soul gem holding it is filled (kEvSoulTrapped).
 		void          SoulTrapped(RE::PlayerCharacter* a_player, std::uint32_t a_soul);
 	}

@@ -267,7 +267,7 @@ namespace skycraft::Workbench
 		std::vector<Turning> turning;
 	}
 
-	void PerFrame()
+	void FacePlaced()
 	{
 		for (auto it = turning.begin(); it != turning.end();) {
 			auto bench = it->bench.get();
@@ -293,9 +293,12 @@ namespace skycraft::Workbench
 			}
 			const auto  at = bench->GetPosition();
 			const float heading = std::atan2(it->from.x - at.x, it->from.y - at.y) - std::atan2(ox, oy);
+			// Its 3D made again at the new angle (turned in place, the model moved off its collision and its
+			// use spot, which stayed where they were).
 			auto turn = [&](RE::TESObjectREFR* a_ref) {
+				a_ref->Disable();
 				a_ref->SetAngle(RE::NiPoint3(0.0f, 0.0f, heading));
-				a_ref->Update3DPosition(true);
+				a_ref->Enable(false);
 			};
 			turn(bench.get());
 			for (auto& handle : it->looks) {
