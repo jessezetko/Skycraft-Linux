@@ -1,6 +1,7 @@
 // SkyCraft+ : Skyrim enemies in Minecraft's own worlds
 #include "Game.h"
 
+#include <limits>
 #include <random>
 
 // While Minecraft's player is in the Nether, or out among the End's outer islands (its cities),
@@ -35,7 +36,10 @@ namespace skycraft::MinecraftEnemies
 			double              floor = 0.0;     // Minecraft y it last stood at, alive
 			float               deadFor = 0.0f;
 			bool                laidDown = false;  // its body held where it fell
-			bool                peaceful = false;  // SkyCraft+ : the Overworld's animals and travellers: not set on the player; they stand and idle (moved by hand every frame, with no navmesh to walk, they shook and slid without walking)
+			bool                peaceful = false;  // SkyCraft+ : the Overworld's animals and travellers: not set on the player; they stroll (Wander)
+			double              wanderX = 0.0, wanderZ = 0.0;  // SkyCraft+ : where it's strolling to (MC coords)
+			float               wanderFor = 0.0f;              // seconds till it picks somewhere else
+			bool                walking = false;               // its walk animation on (the graph's Speed set)
 		};
 		std::vector<Spawned> spawned;
 
@@ -161,6 +165,7 @@ namespace skycraft::MinecraftEnemies
 		// (63): nothing stands lower there (Skyrim's side doesn't know Minecraft's water: they came in on lakebeds
 		// and stayed under). Elsewhere no floor.
 		double spotFloor = -1.0e9;
+		bool   overworldNow = false;  // SkyCraft+ : in the Overworld Portal's world this frame
 
 		bool FindSpot(double a_x, double a_y, double a_z, RE::NiPoint3& a_out)
 		{
@@ -215,12 +220,73 @@ namespace skycraft::MinecraftEnemies
 		 * has stood still a moment, it's walked straight at the player over Minecraft's blocks (up a
 		 * one-block step; not into walls).
 		 */
+		// SkyCraft+ : one stepped by hand plays its walk or run: the animation graph's Speed (units a second) set as
+		// it's moved (moved alone, it slid along frozen); 0 when it stops.
+		void Animate(Spawned& a_s, RE::Actor* a_actor, float a_unitsPerSecond)
+		{
+			if (a_unitsPerSecond > 0.0f || a_s.walking) {
+				a_actor->SetGraphVariableFloat("Speed", a_unitsPerSecond);
+				a_s.walking = a_unitsPerSecond > 0.0f;
+			}
+		}
+
+		/** The foot of a stroll's next step: the ground at most a block up or down there, or NaN (a wall, a drop, water). */
+		double StepFoot(double a_x, double a_y, double a_z)
+		{
+			const int bx = int(std::floor(a_x)), bz = int(std::floor(a_z)), by = int(std::floor(a_y + 0.05));
+			for (int y : { by, by + 1, by - 1 }) {
+				if (y >= spotFloor && NpcBlocks::SolidAt(bx, y - 1, bz) && !NpcBlocks::BlocksBody(bx, y, bz) && !NpcBlocks::BlocksBody(bx, y + 1, bz)) {
+					return y;
+				}
+			}
+			return std::numeric_limits<double>::quiet_NaN();
+		}
+
+		// SkyCraft+ : the Overworld's animals and travellers stroll about: somewhere a few blocks off, or a rest, every
+		// several seconds, walked there by hand (no navmesh: Skyrim's AI moves nobody here), never off a drop or into water.
+		void Wander(Spawned& a_s, RE::Actor* a_actor, float a_delta)
+		{
+			const auto here = SkyToMc(a_actor->GetPosition());
+			if ((a_s.wanderFor -= a_delta) <= 0.0f) {
+				a_s.wanderFor = Uniform(5.0f, 12.0f);
+				const bool  rest = Uniform(0.0f, 1.0f) < 0.35f;
+				const float angle = Uniform(0.0f, 6.2831853f), reach = Uniform(3.0f, 10.0f);
+				a_s.wanderX = rest ? here.x : here.x + std::cos(angle) * reach;
+				a_s.wanderZ = rest ? here.z : here.z + std::sin(angle) * reach;
+			}
+			const double dx = a_s.wanderX - here.x, dz = a_s.wanderZ - here.z;
+			const double distance = std::sqrt(dx * dx + dz * dz);
+			if (distance < 0.3) {
+				Animate(a_s, a_actor, 0.0f);
+				return;
+			}
+			constexpr double kWalk = 1.3;  // blocks a second
+			const double step = std::min<double>(kWalk * a_delta, distance);
+			const double nx = here.x + dx / distance * step, nz = here.z + dz / distance * step;
+			const double ny = StepFoot(nx, here.y, nz);
+			if (std::isnan(ny)) {
+				a_s.wanderX = here.x, a_s.wanderZ = here.z;  // the way's blocked: rest, then somewhere else
+				Animate(a_s, a_actor, 0.0f);
+				return;
+			}
+			a_actor->SetPosition(McToSky(nx, ny, nz), true);
+			a_s.last = a_actor->GetPosition();
+			a_actor->data.angle.z = std::atan2(float(dx), float(-dz));
+			Animate(a_s, a_actor, float(kWalk) * float(proto::kUnitsPerBlock));
+		}
+
 		void Steer(RE::PlayerCharacter* a_player, Spawned& a_s, RE::Actor* a_actor, float a_delta)
 		{
 			const auto pos = a_actor->GetPosition();
 			const float moved = pos.GetDistance(a_s.last);
 			a_s.last = pos;
-			if (!a_actor->IsInCombat()) {
+			if (a_s.peaceful) {
+				Wander(a_s, a_actor, a_delta);  // SkyCraft+
+				return;
+			}
+			// (SkyCraft+ : a hostile one comes for the player whether or not Skyrim's AI took it into combat: in the
+			// empty waiting cell it often didn't, and stood where it came in.)
+			if (!a_actor->IsInCombat() && !overworldNow) {
 				a_s.still = 0.0f;
 				return;
 			}
@@ -236,6 +302,7 @@ namespace skycraft::MinecraftEnemies
 			const double keep = ranged ? kRangedBlocks : kReachBlocks;
 			a_s.still = moved < 0.5f * float(proto::kUnitsPerBlock) * a_delta ? a_s.still + a_delta : 0.0f;  // under half a block a second
 			if (distance <= keep || a_s.still < 0.6f || distance < 0.01) {
+				Animate(a_s, a_actor, 0.0f);
 				return;
 			}
 			const double step = std::min<double>(kStepBlocks * a_delta, distance - keep);
@@ -254,6 +321,7 @@ namespace skycraft::MinecraftEnemies
 			a_actor->SetPosition(McToSky(nx, ny, nz), true);
 			a_s.last = a_actor->GetPosition();  // our step isn't its own moving
 			a_actor->data.angle.z = std::atan2(float(dx), float(-dz));
+			Animate(a_s, a_actor, kStepBlocks * float(proto::kUnitsPerBlock));  // SkyCraft+ : its run plays
 		}
 	}
 
@@ -289,6 +357,7 @@ namespace skycraft::MinecraftEnemies
 			return;
 		}
 		spotFloor = overworld ? 63.0 : -1.0e9;
+		overworldNow = overworld;
 		// Keep the living, near ones; the dead stay where they fell (lootable) until the player leaves.
 		int alive = 0;
 		const auto me = a_player->GetPosition();
