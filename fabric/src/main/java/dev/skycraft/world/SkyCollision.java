@@ -124,6 +124,28 @@ public final class SkyCollision {
 		}
 	}
 
+	/**
+	 * SkyCraft+ : structure loading. A stamp of what Skyrim's original surfaces in a box are made of (each region's
+	 * arrays as they are now): it changes if any of those regions is sent again or comes or goes, without looking
+	 * through their triangles (DigWalls keeps a section's walls while it's the same).
+	 */
+	public static long originalSurfacesStamp(net.minecraft.world.phys.AABB box) {
+		int rx0 = Math.floorDiv((int) Math.floor(box.minX), REGION_SIZE), rx1 = Math.floorDiv((int) Math.floor(box.maxX), REGION_SIZE);
+		int ry0 = Math.floorDiv((int) Math.floor(box.minY), REGION_SIZE), ry1 = Math.floorDiv((int) Math.floor(box.maxY), REGION_SIZE);
+		int rz0 = Math.floorDiv((int) Math.floor(box.minZ), REGION_SIZE), rz1 = Math.floorDiv((int) Math.floor(box.maxZ), REGION_SIZE);
+		long stamp = 17L;
+		for (int rx = rx0; rx <= rx1; rx++) {
+			for (int ry = ry0; ry <= ry1; ry++) {
+				for (int rz = rz0; rz <= rz1; rz++) {
+					long key = regionKey(rx, ry, rz);
+					stamp = stamp * 31L + System.identityHashCode(TRIS.get(key));
+					stamp = stamp * 31L + System.identityHashCode(GHOSTS.get(key));
+				}
+			}
+		}
+		return stamp;
+	}
+
 	/** True once Skyrim has sent the region containing this block (even if it was empty). */
 	public static boolean isKnown(int x, int y, int z) {
 		return KNOWN_REGIONS.contains(regionKey(Math.floorDiv(x, REGION_SIZE), Math.floorDiv(y, REGION_SIZE), Math.floorDiv(z, REGION_SIZE)));

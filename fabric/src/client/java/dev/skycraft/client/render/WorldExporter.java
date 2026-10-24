@@ -478,8 +478,14 @@ public final class WorldExporter {
 	/** SkyCraft+ : performance. Where a slow section's time went (the parts meshSection counts). */
 	private static long partColumns, partBlocks, partWalls, partSend;
 	private static int slowSections;
+	private static long slowSectionsSince = System.nanoTime();
 
 	private static void noteSlowSection(long key, long nanos) {
+		// (SkyCraft+ : 60 every five minutes, not 60 a session: they were all spent while the game started.)
+		if (System.nanoTime() - slowSectionsSince > 300_000_000_000L) {
+			slowSectionsSince = System.nanoTime();
+			slowSections = 0;
+		}
 		if (nanos > 25_000_000L && slowSections < 60) {
 			slowSections++;
 			SkyCraft.LOG.info("SkyCraft: slow section {} {} {}: {} ms (Skyrim's ground round it {} ms, its blocks {} ms, dug walls {} ms, sending {} ms)",

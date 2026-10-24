@@ -45,14 +45,14 @@ final class DigWalls {
 	static void add(ClientLevel level, int sx, int sy, int sz, long[] dug, SkyDig.DugLookup lookup, Faces faces, Out out) {
 		// SkyCraft+ : structure loading. Skyrim's surfaces round the section gathered once (every
 		// neighbour cell is within it), not for each face.
-		List<SkyTri> near = new ArrayList<>();
-		dev.skycraft.world.SkyCollision.originalSurfacesNear(SkyDig.Probe.reach(sx * 16 - 1, sy * 16 - 1, sz * 16 - 1, sx * 16 + 17, sy * 16 + 17, sz * 16 + 17), near);
+		var reach = SkyDig.Probe.reach(sx * 16 - 1, sy * 16 - 1, sz * 16 - 1, sx * 16 + 17, sy * 16 + 17, sz * 16 + 17);
 		// SkyCraft+ : structure loading. The walls again as last made, if nothing they're made from has changed
 		// (which cells are dug, which round them are solid, Skyrim's surfaces near): a structure being placed
 		// had the same sections meshed again and again, their walls worked out anew each time (tens of ms).
 		BlockPos.MutableBlockPos cell = new BlockPos.MutableBlockPos();
 		BlockPos.MutableBlockPos next = new BlockPos.MutableBlockPos();
-		long inputs = dev.skycraft.world.SkyCollision.epoch() * 31L + near.size();
+		// (Skyrim's surfaces by a stamp of their regions: gathering them only to see they hadn't changed cost as much.)
+		long inputs = dev.skycraft.world.SkyCollision.epoch() * 31L + dev.skycraft.world.SkyCollision.originalSurfacesStamp(reach);
 		for (int word = 0; word < 64; word++) {
 			long bits = dug[word];
 			while (bits != 0) {
@@ -85,6 +85,8 @@ final class DigWalls {
 			}
 			return;
 		}
+		List<SkyTri> near = new ArrayList<>();
+		dev.skycraft.world.SkyCollision.originalSurfacesNear(reach, near);
 		List<Quad> quads = new ArrayList<>();
 		int[] at = new int[3];
 		Out recording = (xyz, uv, light, normal) -> {
