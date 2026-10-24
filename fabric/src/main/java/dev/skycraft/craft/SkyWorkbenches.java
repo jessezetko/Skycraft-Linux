@@ -49,12 +49,12 @@ public final class SkyWorkbenches extends Item {
 	private static final String[] KIND_LOOKS = { "crafting_table", "blast_furnace", "grindstone", "enchanting_table", "enchanting_table", "brewing_stand", "brewing_stand", "smithing_table" };
 
 	/** The client's side (SkyWorkbenchesClient): tells its Skyrim to stand the workbench there. */
-	public static volatile PlaceHook clientPlace = (formId, pos, footY, yaw) -> false;
+	public static volatile PlaceHook clientPlace = (formId, foot, yaw) -> false;
 
 	@FunctionalInterface
 	public interface PlaceHook {
-		/** footY: the height it stands at (where the click landed on a top face: Skyrim's ground runs through its cell). */
-		boolean place(int formId, BlockPos pos, double footY, float yaw);
+		/** foot: where it stands (on a top face, the point the click landed on: Skyrim's ground runs through its cell). */
+		boolean place(int formId, net.minecraft.world.phys.Vec3 foot, float yaw);
 	}
 
 	private SkyWorkbenches(Item.Properties properties) {
@@ -128,9 +128,12 @@ public final class SkyWorkbenches extends Item {
 		}
 		BlockPos at = context.getClickedPos().relative(context.getClickedFace());
 		if (context.getLevel().isClientSide()) {
-			// On a top face, where the click landed: Skyrim's ground lies inside its cell (stood on the cell above, it floated).
-			double footY = context.getClickedFace() == net.minecraft.core.Direction.UP ? Math.min(context.getClickLocation().y, at.getY()) : at.getY();
-			return clientPlace.place(formId, at, footY, context.getPlayer().getYRot()) ? InteractionResult.SUCCESS : InteractionResult.FAIL;
+			// On a top face, where the click landed: Skyrim's ground lies inside its cell (stood on the cell above, it
+			// floated), and the crosshair isn't the cell's middle (it stood off from it).
+			var click = context.getClickLocation();
+			var foot = context.getClickedFace() == net.minecraft.core.Direction.UP ? new net.minecraft.world.phys.Vec3(click.x, Math.min(click.y, at.getY()), click.z)
+				: net.minecraft.world.phys.Vec3.atBottomCenterOf(at);
+			return clientPlace.place(formId, foot, context.getPlayer().getYRot()) ? InteractionResult.SUCCESS : InteractionResult.FAIL;
 		}
 		if (!context.getPlayer().getAbilities().instabuild) {
 			context.getItemInHand().shrink(1);

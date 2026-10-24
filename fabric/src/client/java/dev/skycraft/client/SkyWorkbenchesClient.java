@@ -22,11 +22,11 @@ public final class SkyWorkbenchesClient {
 	private static final Set<Integer> ASKED = new HashSet<>();
 
 	public static void init() {
-		SkyWorkbenches.clientPlace = (formId, pos, footY, yaw) -> {
+		SkyWorkbenches.clientPlace = (formId, foot, yaw) -> {
 			if (!SkyClient.linked() || !dev.skycraft.SkySettings.flag("skyrimWorkbenchesTaken", true)) {
 				return false;
 			}
-			SkyLink.pushEvent(Proto.EV_PLACE_WORKBENCH, formId, pos.getX() + 0.5f, (float) footY, pos.getZ() + 0.5f, yaw, 0);
+			SkyLink.pushEvent(Proto.EV_PLACE_WORKBENCH, formId, (float) foot.x, (float) foot.y, (float) foot.z, yaw, 0);
 			return true;
 		};
 	}

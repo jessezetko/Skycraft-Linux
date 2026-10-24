@@ -1275,6 +1275,9 @@ namespace skycraft
 				case proto::kEvSoulTrapped:
 					Workbench::SoulTrapped(a_player, ev.flags);  // SkyCraft+ : soul trap on Minecraft mobs
 					break;
+				case proto::kEvRestoreWorkbench:
+					Workbench::Restore(a_player, ev.a, ev.b, ev.c);  // SkyCraft+ : the restoration brush
+					break;
 				case proto::kEvPlaceWorkbench:
 					Workbench::Place(a_player, ev.formId, ev.a, ev.b, ev.c, ev.d);  // SkyCraft+
 					break;

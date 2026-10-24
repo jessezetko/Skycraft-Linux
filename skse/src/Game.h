@@ -555,6 +555,8 @@ namespace skycraft
 		bool          IsPlaced(RE::TESObjectREFR* a_ref);
 		// Takes the workbench nearest the point (MC coords) out of Skyrim's world (kStoreTakeWorkbench): its furniture, or 0.
 		RE::FormID    Take(RE::PlayerCharacter* a_player, float a_x, float a_y, float a_z, std::string& a_name, int& a_kind);
+		// SkyCraft+ (v64): the restoration brush where nothing was dug: Skyrim's own workbenches taken near the point (MC coords) come back.
+		void          Restore(RE::PlayerCharacter* a_player, float a_x, float a_y, float a_z);
 		// A Skyrim workbench item placed (kEvPlaceWorkbench).
 		void          Place(RE::PlayerCharacter* a_player, RE::FormID a_furniture, float a_x, float a_y, float a_z, float a_yaw);
 		// Each frame: workbenches just placed turned to face whoever placed them, once their models have loaded.

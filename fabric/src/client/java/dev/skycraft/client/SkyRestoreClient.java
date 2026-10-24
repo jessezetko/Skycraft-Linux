@@ -92,6 +92,13 @@ public final class SkyRestoreClient {
 			ClientPlayNetworking.send(new SkyRestore.Restore(world, cell, fill, offHand));
 			return true;
 		}
+		// SkyCraft+ : nothing dug here: a workbench of Skyrim's own taken from about here comes back (Skyrim says if
+		// none did). Aimed where it stood: what's hit, or as far as the brush reaches.
+		if (dev.skycraft.client.SkyClient.linked() && minecraft.hitResult != null) {
+			Vec3 at = minecraft.hitResult.getType() != net.minecraft.world.phys.HitResult.Type.MISS ? minecraft.hitResult.getLocation() : eye.add(look.scale(REACH));
+			dev.skycraft.link.SkyLink.pushEvent(dev.skycraft.link.Proto.EV_RESTORE_WORKBENCH, 0, (float) at.x, (float) at.y, (float) at.z, 0.0F, 0);
+			return true;
+		}
 		player.sendOverlayMessage(Component.literal("Nothing dug out of Skyrim here to put back"));
 		return false;
 	}

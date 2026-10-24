@@ -293,10 +293,30 @@ namespace skycraft::Workbench
 			}
 			const auto  at = bench->GetPosition();
 			const float heading = std::atan2(it->from.x - at.x, it->from.y - at.y) - std::atan2(ox, oy);
+			// The model's middle on the point it was placed at (its origin often isn't: stood by its origin, it was a
+			// little in front of the crosshair). The model seen: the look's, if it has one (a forge's furniture is
+			// a marker beside it).
+			RE::NiAVObject* shown = root;
+			if (!it->looks.empty()) {
+				if (auto look = it->looks[0].get(); look && look->Get3D()) {
+					shown = look->Get3D();
+				}
+			}
+			RE::NiPoint3 origin = at;
+			{
+				const float h0 = bench->GetAngleZ();
+				const auto  c = shown->worldBound.center - at;
+				const float lx = c.x * std::cos(h0) - c.y * std::sin(h0), ly = c.x * std::sin(h0) + c.y * std::cos(h0);  // in its own frame
+				const float wx = lx * std::cos(heading) + ly * std::sin(heading), wy = -lx * std::sin(heading) + ly * std::cos(heading);  // turned
+				if (wx * wx + wy * wy < 3.0f * 3.0f * float(proto::kUnitsPerBlock) * float(proto::kUnitsPerBlock)) {
+					origin.x -= wx, origin.y -= wy;
+				}
+			}
 			// Its 3D made again at the new angle (turned in place, the model moved off its collision and its
 			// use spot, which stayed where they were).
 			auto turn = [&](RE::TESObjectREFR* a_ref) {
 				a_ref->Disable();
+				a_ref->SetPosition(origin);
 				a_ref->SetAngle(RE::NiPoint3(0.0f, 0.0f, heading));
 				a_ref->Enable(false);
 			};
@@ -308,6 +328,32 @@ namespace skycraft::Workbench
 			}
 			logger::info("workbench: {} turned to face the player (its use spot at {:.0f}, {:.0f})", bench->GetDisplayFullName(), ox, oy);
 			it = turning.erase(it);
+		}
+	}
+
+	void Restore(RE::PlayerCharacter* a_player, float a_x, float a_y, float a_z)
+	{
+		auto* tes = RE::TES::GetSingleton();
+		if (!tes || !a_player) {
+			return;
+		}
+		const RE::NiPoint3 at = McToSky(a_x, a_y, a_z);
+		constexpr float    kReach = 5.0f * float(proto::kUnitsPerBlock);
+		std::vector<RE::TESObjectREFR*> back;
+		tes->ForEachReferenceInRange(a_player, a_player->GetPosition().GetDistance(at) + kReach + 100.0f, [&](RE::TESObjectREFR* ref) {
+			// Skyrim's own (not one placed from an item), switched off by a pickaxe (kStoreTakeWorkbench disables it).
+			if (ref && ref->IsDisabled() && !ref->IsDeleted() && (ref->GetFormID() >> 24) != 0xFF && IsWorkbenchPart(ref) && ref->GetPosition().GetDistance(at) < kReach) {
+				back.push_back(ref);
+			}
+			return RE::BSContainer::ForEachResult::kContinue;
+		});
+		for (auto* ref : back) {
+			ref->Enable(false);
+		}
+		if (back.empty()) {
+			RE::SendHUDMessage::ShowHUDMessage("Nothing dug out of Skyrim here to put back");
+		} else {
+			logger::info("workbench: the restoration brush put back {} of Skyrim's own workbench part(s)", back.size());
 		}
 	}
 
