@@ -184,9 +184,16 @@ public final class SkyEnchanting {
 		};
 	}
 
-	/** Server: a soul gem's charge into the main-hand weapon's Skyrim enchantment. */
-	public static void recharge(ServerPlayer player, float charge) {
-		ItemStack weapon = player.getMainHandItem();
+	/** SkyCraft+ : a soul gem's shortcut clicked onto the weapon in this inventory slot (ItemRechargeMixin). */
+	public record RechargeAsk(ItemStack gem, int slot) {
+	}
+
+	/** SkyCraft+ : the client's side (SkyCraftingClient): its Skyrim gives the gem up and the server charges the weapon. */
+	public static volatile java.util.function.Predicate<RechargeAsk> clientRecharge = ask -> false;
+
+	/** Server: a soul gem's charge into the main-hand weapon's Skyrim enchantment (SkyCraft+ : or the one in inventory slot - 1). */
+	public static void recharge(ServerPlayer player, float charge, int slot) {
+		ItemStack weapon = slot > 0 && slot <= player.getInventory().getContainerSize() ? player.getInventory().getItem(slot - 1) : player.getMainHandItem();
 		Enchant enchant = enchant(weapon);
 		if (enchant == null || charge <= 0.0F) {
 			return;

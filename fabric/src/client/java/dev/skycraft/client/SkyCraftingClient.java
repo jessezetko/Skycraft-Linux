@@ -19,6 +19,12 @@ public final class SkyCraftingClient {
 	}
 
 	public static void register() {
+		// SkyCraft+ : a soul gem clicked onto the weapon in the inventory (ItemRechargeMixin).
+		dev.skycraft.craft.SkyEnchanting.clientRecharge = ask -> {
+			var item = SkyShortcutsClient.resolve(ask.gem());
+			var player = net.minecraft.client.Minecraft.getInstance().player;
+			return item != null && player != null && recharge(item, player.getInventory().getItem(ask.slot()), ask.slot() + 1);
+		};
 		BlockColorRegistry.register(List.of(BlockTintSources.constant(SkyConversionTable.TINT)), SkyConversionTable.BLOCK);
 		MenuScreens.register(SkyConversionTable.MENU, ConversionScreen::new);
 		// SkyCraft+ : Skyrim geo. A placed piece's data arrived after its block: its section drawn again with it.
@@ -27,12 +33,21 @@ public final class SkyCraftingClient {
 
 	/** A filled soul gem used with a Skyrim-enchanted Minecraft weapon in hand: its soul goes into the enchantment's charge (Skyrim gives the gem up). */
 	static boolean recharge(dev.skycraft.link.SkyLink.SkyItem item) {
+		var player = net.minecraft.client.Minecraft.getInstance().player;
+		return player != null && recharge(item, player.getMainHandItem(), 0);
+	}
+
+	/** SkyCraft+ : into this weapon (slot: its inventory slot + 1, 0 the main hand). */
+	static boolean recharge(dev.skycraft.link.SkyLink.SkyItem item, net.minecraft.world.item.ItemStack weapon, int slot) {
 		var minecraft = net.minecraft.client.Minecraft.getInstance();
 		var player = minecraft.player;
-		if (player == null || item.kind() != dev.skycraft.link.Proto.SKY_MISC || item.sub() != 1 || !item.has(dev.skycraft.link.Proto.ITEM_FILLED)) {
+		if (player == null || item.kind() != dev.skycraft.link.Proto.SKY_MISC || item.sub() != 1) {
 			return false;
 		}
-		var weapon = player.getMainHandItem();
+		if (!item.has(dev.skycraft.link.Proto.ITEM_FILLED)) {
+			player.sendOverlayMessage(Component.literal(item.name() + " is empty: only a filled soul gem recharges"));
+			return slot > 0;
+		}
 		var enchant = dev.skycraft.craft.SkyEnchanting.enchant(weapon);
 		float charge = dev.skycraft.craft.SkyEnchanting.soulCharge(Math.round(item.stat()));
 		if (enchant == null || enchant.max() <= 0.0F || charge <= 0.0F) {
@@ -43,7 +58,7 @@ public final class SkyCraftingClient {
 			return true;
 		}
 		dev.skycraft.link.SkyLink.pushEvent(dev.skycraft.link.Proto.EV_SKY_ITEM, item.formId(), 0.0F, 0.0F, 0.0F, 0.0F, dev.skycraft.link.Proto.SKY_ACT_CONSUME);
-		SkyClient.act(minecraft, dev.skycraft.net.SkyNet.Act.simple(dev.skycraft.net.SkyNet.Act.RECHARGE, 0, charge, 0.0F));
+		SkyClient.act(minecraft, dev.skycraft.net.SkyNet.Act.simple(dev.skycraft.net.SkyNet.Act.RECHARGE, slot, charge, 0.0F));
 		return true;
 	}
 
