@@ -91,7 +91,14 @@ namespace skycraft::MusicDiscs
 		{
 			RE::BSSoundHandle sound;
 			std::uint32_t     disc;
+			RE::NiPoint3      at;  // the jukebox (Skyrim's units)
 		};
+
+		// Skyrim's own music (AudioCategoryMUS) is turned down while the player is near a jukebox playing:
+		// it played on over the disc's song. Its volume before (-1: not turned down).
+		constexpr RE::FormID kMusicCategory = 0x00071E64;
+		constexpr float      kMuteReachBlocks = 48.0f;
+		float                musicVolumeBefore = -1.0f;
 		std::unordered_map<std::int64_t, Playing> playing;  // by the jukebox's block
 
 		std::int64_t Key(float a_x, float a_y, float a_z)
@@ -138,22 +145,39 @@ namespace skycraft::MusicDiscs
 			logger::warn("music discs: Skyrim couldn't open {}", song);
 			return;
 		}
-		entry.sound.SetPosition(McToSky(a_x, a_y, a_z));
+		entry.at = McToSky(a_x, a_y, a_z);
+		entry.sound.SetPosition(entry.at);
 		entry.sound.SetVolume(1.0f);
 		const bool played = entry.sound.Play();
 		logger::info("music discs: a jukebox plays {} ({})", song, played ? "playing" : "didn't start");
 		playing.emplace(key, std::move(entry));
 	}
 
-	// Each frame: songs that ended on their own are let go.
+	// Each frame: songs that ended on their own are let go; Skyrim's music is quiet near one playing.
 	void PerFrame()
 	{
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		bool  nearby = false;
 		for (auto it = playing.begin(); it != playing.end();) {
 			if (!it->second.sound.IsValid() || it->second.sound.state.get() == RE::BSSoundHandle::AssumedState::kStopped) {
 				it = playing.erase(it);
 			} else {
+				nearby = nearby || (player && player->GetPosition().GetDistance(it->second.at) < kMuteReachBlocks * float(proto::kUnitsPerBlock));
 				++it;
 			}
+		}
+		auto* music = RE::TESForm::LookupByID<RE::BGSSoundCategory>(kMusicCategory);
+		if (!music) {
+			return;
+		}
+		if (nearby && musicVolumeBefore < 0.0f) {
+			musicVolumeBefore = music->GetCategoryVolume();
+			music->SetCategoryVolume(0.0f);
+			logger::info("music discs: Skyrim's music turned down while a jukebox plays (was {:.2f})", musicVolumeBefore);
+		} else if (!nearby && musicVolumeBefore >= 0.0f) {
+			music->SetCategoryVolume(musicVolumeBefore);
+			logger::info("music discs: Skyrim's music back to {:.2f}", musicVolumeBefore);
+			musicVolumeBefore = -1.0f;
 		}
 	}
 }
