@@ -18,6 +18,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class MobSunBurnMixin {
 	@Inject(method = "isSunBurnTick", at = @At("HEAD"), cancellable = true)
 	private void skycraft$notIndoors(CallbackInfoReturnable<Boolean> cir) {
+		// SkyCraft+ : a world of Minecraft's own (the Overworld Portal's) is Minecraft's sun: Skyrim's player waits
+		// in an interior meanwhile, and nothing burnt there by day.
+		if (dev.skycraft.world.SkyDig.minecraftsOwnWorld(((Mob) (Object) this).level())) {
+			return;
+		}
 		if (SkyWorld.valid() && SkyWorld.interior()) {
 			cir.setReturnValue(false);
 			return;

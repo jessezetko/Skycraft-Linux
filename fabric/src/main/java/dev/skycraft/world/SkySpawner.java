@@ -132,7 +132,13 @@ public final class SkySpawner {
 	}
 
 	private static void tick(MinecraftServer server) {
-		if (!SkyWorld.valid() || !SkyCollision.active() || server.getTickCount() % 20 != 0) {
+		if (!SkyWorld.valid() || server.getTickCount() % 20 != 0) {
+			return;
+		}
+		// SkyCraft+ : the Overworld Portal's world. The clock follows Skyrim's there too: it went still, Skyrim
+		// sending no collision while its player waits (synced only with it).
+		syncTimeAndWeather(server);
+		if (!SkyCollision.active()) {
 			return;
 		}
 		ServerPlayer host = null;
@@ -142,11 +148,13 @@ public final class SkySpawner {
 				break;
 			}
 		}
-		syncTimeAndWeather(server);
 		if (host == null || !host.isAlive() || host.isSpectator()) {
 			return;
 		}
 		ServerLevel level = host.level();
+		if (SkyDig.minecraftsOwnWorld(level)) {
+			return;  // SkyCraft+ : Minecraft's own spawning there (this spawner places on Skyrim's ground)
+		}
 		if (server.getTickCount() % 100 == 0) {
 			despawnFarAnimals(level);
 		}
