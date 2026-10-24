@@ -1706,6 +1706,7 @@ namespace skycraft
 			LootSpots::PerFrame(a_player, a_delta);  // SkyCraft+
 			Crops::PerFrame(a_delta);  // SkyCraft+
 			MusicDiscs::PerFrame();  // SkyCraft+
+			Workbench::PerFrame();   // SkyCraft+ : placed workbenches face the player
 			MapMarkers::PerFrame(a_player, a_delta);  // SkyCraft+
 			SkyInventory::PerFrame(a_player, haveMc && (mc.flags & proto::kMcWantsSkyInventory) != 0, a_delta);  // SkyCraft+
 			Workbench::PerFrame(a_delta);  // SkyCraft+

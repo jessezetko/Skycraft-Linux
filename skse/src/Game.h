@@ -556,6 +556,8 @@ namespace skycraft
 		RE::FormID    Take(RE::PlayerCharacter* a_player, float a_x, float a_y, float a_z, std::string& a_name, int& a_kind);
 		// A Skyrim workbench item placed (kEvPlaceWorkbench).
 		void          Place(RE::PlayerCharacter* a_player, RE::FormID a_furniture, float a_x, float a_y, float a_z, float a_yaw);
+		// Each frame: workbenches just placed turned to face whoever placed them, once their models have loaded.
+		void          PerFrame();
 		// A Minecraft mob died soul-trapped by the player: an empty soul gem holding it is filled (kEvSoulTrapped).
 		void          SoulTrapped(RE::PlayerCharacter* a_player, std::uint32_t a_soul);
 	}

@@ -252,6 +252,62 @@ namespace skycraft::Workbench
 		return furniture->GetFormID();
 	}
 
+	namespace
+	{
+		// A workbench just placed, turned once its model has loaded so the side it's used from faces the
+		// player who placed it (each model's front is its own: one angle for all stood the workbench
+		// sideways and the enchanter backwards).
+		struct Turning
+		{
+			RE::ObjectRefHandle              bench;
+			std::vector<RE::ObjectRefHandle> looks;
+			RE::NiPoint3                     from;  // the player who placed it
+			int                              frames = 0;
+		};
+		std::vector<Turning> turning;
+	}
+
+	void PerFrame()
+	{
+		for (auto it = turning.begin(); it != turning.end();) {
+			auto bench = it->bench.get();
+			auto* root = bench ? bench->Get3D() : nullptr;
+			auto* node = root ? RE::BSFurnitureMarkerNode::FindBSFurnitureMarkerNode(root) : nullptr;
+			if (!node || node->markers.empty()) {
+				if (!bench || ++it->frames > 600) {
+					if (bench) {
+						logger::info("workbench: {} has no use markers to turn by; left facing the player", bench->GetDisplayFullName());
+					}
+					it = turning.erase(it);
+				} else {
+					++it;
+				}
+				continue;
+			}
+			// Where it's used from, in its own frame: the first marker's spot; at its middle, behind
+			// where the user faces.
+			const auto& marker = node->markers[0];
+			float ox = marker.offset.x, oy = marker.offset.y;
+			if (ox * ox + oy * oy < 4.0f) {
+				ox = -std::sin(marker.heading), oy = -std::cos(marker.heading);
+			}
+			const auto  at = bench->GetPosition();
+			const float heading = std::atan2(it->from.x - at.x, it->from.y - at.y) - std::atan2(ox, oy);
+			auto turn = [&](RE::TESObjectREFR* a_ref) {
+				a_ref->SetAngle(RE::NiPoint3(0.0f, 0.0f, heading));
+				a_ref->Update3DPosition(true);
+			};
+			turn(bench.get());
+			for (auto& handle : it->looks) {
+				if (auto look = handle.get()) {
+					turn(look.get());
+				}
+			}
+			logger::info("workbench: {} turned to face the player (its use spot at {:.0f}, {:.0f})", bench->GetDisplayFullName(), ox, oy);
+			it = turning.erase(it);
+		}
+	}
+
 	void Place(RE::PlayerCharacter* a_player, RE::FormID a_furniture, float a_x, float a_y, float a_z, float a_yaw)
 	{
 		auto* base = RE::TESForm::LookupByID<RE::TESFurniture>(a_furniture);
@@ -267,15 +323,25 @@ namespace skycraft::Workbench
 				ref->SetPosition(at);
 				ref->SetAngle(angle);
 			}
+			return ref;
 		};
-		put(base);
+		Turning turn;
+		turn.from = a_player->GetPosition();
+		if (auto bench = put(base)) {
+			turn.bench = bench->CreateRefHandle();
+		}
 		for (const auto& l : kLooks) {
 			if (l.furniture == a_furniture) {
 				if (auto* look = RE::TESForm::LookupByID<RE::TESBoundObject>(l.look)) {
-					put(look);
+					if (auto ref = put(look)) {
+						turn.looks.push_back(ref->CreateRefHandle());
+					}
 				}
 				break;
 			}
+		}
+		if (turn.bench) {
+			turning.push_back(std::move(turn));
 		}
 		logger::info("workbench: {} placed", base->GetName());
 	}
