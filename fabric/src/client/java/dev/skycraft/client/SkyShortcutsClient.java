@@ -300,6 +300,42 @@ public final class SkyShortcutsClient {
 		return false;
 	}
 
+	// SkyCraft+ : enchanting across the games. What the player's Skyrim held a second ago (enchantKey), and what
+	// had gone from it then: gone two looks running, its Minecraft enchantments are forgotten (ForgetEnchants).
+	private static java.util.@org.jspecify.annotations.Nullable Set<String> heldKeys;
+	private static java.util.Set<String> goneOnce = new java.util.HashSet<>();
+	private static int heldCheck;
+
+	private static void forgetEnchantsOfGone() {
+		if (++heldCheck % 20 != 0 || !ClientPlayNetworking.canSend(SkyShortcuts.ForgetEnchants.TYPE)) {
+			return;
+		}
+		SkyLink.SkyInventory read = SkyLink.readSkyInventory();
+		if (read == null || read.items().isEmpty()) {
+			return;  // (not read, or nothing for a moment while Skyrim loads)
+		}
+		java.util.Set<String> now = new java.util.HashSet<>();
+		for (SkyLink.SkyItem item : read.items()) {
+			if (item.kind() < Proto.SKY_SPELL && item.count() > 0) {
+				now.add(SkyShortcuts.enchantKey(item.plugin(), item.localId()));
+			}
+		}
+		for (String key : goneOnce) {
+			if (!now.contains(key)) {
+				ClientPlayNetworking.send(new SkyShortcuts.ForgetEnchants(key));
+			}
+		}
+		goneOnce = new java.util.HashSet<>();
+		if (heldKeys != null) {
+			for (String key : heldKeys) {
+				if (!now.contains(key)) {
+					goneOnce.add(key);
+				}
+			}
+		}
+		heldKeys = now;
+	}
+
 	/** Each tick: Skyrim's list read again if it changed, and a shortcut newly picked or put in the off hand equipped. */
 	static void tick(Minecraft minecraft) {
 		LocalPlayer player = minecraft.player;
@@ -307,8 +343,11 @@ public final class SkyShortcutsClient {
 			anyShortcuts = false;
 			inventory = null;
 			generation = Integer.MIN_VALUE;
+			heldKeys = null;
+			goneOnce.clear();
 			return;
 		}
+		forgetEnchantsOfGone();
 		boolean any = false;
 		var items = player.getInventory();
 		for (int i = 0; i < items.getContainerSize() && !any; i++) {

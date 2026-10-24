@@ -83,6 +83,26 @@ public final class SkyShortcuts {
 		}
 	}
 
+	/**
+	 * SkyCraft+ : enchanting across the games. Client -> server: the player's Skyrim no longer has any of this
+	 * thing ("plugin:localId", enchantKey): its Minecraft enchantments are forgotten (one got again came
+	 * enchanted as the one deleted).
+	 */
+	public record ForgetEnchants(String key) implements CustomPacketPayload {
+		public static final Type<ForgetEnchants> TYPE = new Type<>(Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "shortcut_forget_enchants"));
+		public static final StreamCodec<RegistryFriendlyByteBuf, ForgetEnchants> CODEC = StreamCodec.composite(ByteBufCodecs.STRING_UTF8, ForgetEnchants::key, ForgetEnchants::new);
+
+		@Override
+		public Type<? extends CustomPacketPayload> type() {
+			return TYPE;
+		}
+	}
+
+	/** SkyCraft+ : the key a Skyrim thing's Minecraft enchantments are remembered by (ENCHANTS). */
+	public static String enchantKey(String plugin, int localId) {
+		return plugin.toLowerCase(java.util.Locale.ROOT) + ":" + localId;
+	}
+
 	/** Server -> client: the player threw a shortcut out: their Skyrim drops the real thing. */
 	public record Dropped(String plugin, int localId) implements CustomPacketPayload {
 		public static final Type<Dropped> TYPE = new Type<>(Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "shortcut_dropped"));
@@ -183,7 +203,7 @@ public final class SkyShortcuts {
 				if (ref == null) {
 					continue;
 				}
-				String key = ref.plugin().toLowerCase(java.util.Locale.ROOT) + ":" + ref.localId();
+				String key = enchantKey(ref.plugin(), ref.localId());
 				var enchantments = stack.get(DataComponents.ENCHANTMENTS);
 				if (enchantments != null && !enchantments.isEmpty()) {
 					if (known == null || !enchantments.equals(known.get(key))) {
@@ -208,6 +228,19 @@ public final class SkyShortcuts {
 		net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(SkyShortcuts::enchantsTick);
 		PayloadTypeRegistry.serverboundPlay().register(Make.TYPE, Make.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(Forget.TYPE, Forget.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(ForgetEnchants.TYPE, ForgetEnchants.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(ForgetEnchants.TYPE, (payload, context) -> {
+			ServerPlayer player = context.player();
+			context.server().execute(() -> {
+				java.util.Map<String, net.minecraft.world.item.enchantment.ItemEnchantments> known = player.getAttached(ENCHANTS);
+				if (known != null && known.containsKey(payload.key())) {
+					known = new java.util.HashMap<>(known);
+					known.remove(payload.key());
+					player.setAttached(ENCHANTS, known);
+					SkyCraft.LOG.info("SkyCraft: {} has no {} left in Skyrim; its Minecraft enchantments are forgotten", player.getName().getString(), payload.key());
+				}
+			});
+		});
 		PayloadTypeRegistry.clientboundPlay().register(Dropped.TYPE, Dropped.CODEC);
 		ServerPlayNetworking.registerGlobalReceiver(Make.TYPE, (payload, context) -> {
 			ServerPlayer player = context.player();
