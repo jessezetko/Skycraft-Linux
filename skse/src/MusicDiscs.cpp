@@ -94,11 +94,10 @@ namespace skycraft::MusicDiscs
 			RE::NiPoint3      at;  // the jukebox (Skyrim's units)
 		};
 
-		// Skyrim's own music (AudioCategoryMUS) is turned down while the player is near a jukebox playing:
-		// it played on over the disc's song. Its volume before (-1: not turned down).
-		constexpr RE::FormID kMusicCategory = 0x00071E64;
-		constexpr float      kMuteReachBlocks = 48.0f;
-		float                musicVolumeBefore = -1.0f;
+		// Skyrim's own music is paused while the player is near a jukebox playing: it played on over the disc's
+		// song. (Turning its sound category down didn't quiet it, and the volume read back lower each time.)
+		constexpr float     kMuteReachBlocks = 48.0f;
+		RE::BSIMusicType*   pausedMusic = nullptr;  // the music type paused (resumed once no jukebox plays near)
 		std::unordered_map<std::int64_t, Playing> playing;  // by the jukebox's block
 
 		std::int64_t Key(float a_x, float a_y, float a_z)
@@ -166,18 +165,24 @@ namespace skycraft::MusicDiscs
 				++it;
 			}
 		}
-		auto* music = RE::TESForm::LookupByID<RE::BGSSoundCategory>(kMusicCategory);
-		if (!music) {
-			return;
-		}
-		if (nearby && musicVolumeBefore < 0.0f) {
-			musicVolumeBefore = music->GetCategoryVolume();
-			music->SetCategoryVolume(0.0f);
-			logger::info("music discs: Skyrim's music turned down while a jukebox plays (was {:.2f})", musicVolumeBefore);
-		} else if (!nearby && musicVolumeBefore >= 0.0f) {
-			music->SetCategoryVolume(musicVolumeBefore);
-			logger::info("music discs: Skyrim's music back to {:.2f}", musicVolumeBefore);
-			musicVolumeBefore = -1.0f;
+		auto* manager = RE::BSMusicManager::GetSingleton();
+		auto* current = manager ? manager->current : nullptr;
+		using Status = RE::BSIMusicType::MUSIC_STATUS;
+		if (nearby) {
+			// (Each frame: Skyrim may start another meanwhile, combat's or a new place's.)
+			if (current && current->typeStatus.get() == Status::kPlaying) {
+				current->DoPause();
+				if (current != pausedMusic) {
+					logger::info("music discs: Skyrim's music paused while a jukebox plays");
+				}
+				pausedMusic = current;
+			}
+		} else if (pausedMusic) {
+			if (pausedMusic == current && current->typeStatus.get() == Status::kPaused) {
+				current->DoPlay();
+			}
+			logger::info("music discs: Skyrim's music goes on");
+			pausedMusic = nullptr;
 		}
 	}
 }
