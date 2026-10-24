@@ -1257,6 +1257,21 @@ namespace skycraft
 				case proto::kEvMeleeEnchants:
 					meleeEnchants = ev.flags;  // SkyCraft+ : Minecraft enchantments on Skyrim weapons
 					break;
+				case proto::kEvSpendCharge:
+					{
+						// SkyCraft+ (v63): a Skyrim weapon's enchantment acted out on Minecraft mob(s): one hit's charge.
+						const bool left = ev.flags == 1;
+						auto*      entry = a_player->GetEquippedEntryData(left);
+						auto*      enchantment = entry ? entry->GetEnchantment() : nullptr;
+						if (auto* weapon = a_player->GetEquippedObject(left); !enchantment && weapon && weapon->As<RE::TESObjectWEAP>()) {
+							enchantment = weapon->As<RE::TESObjectWEAP>()->formEnchanting;
+						}
+						if (enchantment) {
+							const float cost = enchantment->data.costOverride > 0 ? static_cast<float>(enchantment->data.costOverride) : enchantment->CalculateMagickaCost(a_player);
+							a_player->AsActorValueOwner()->DamageActorValue(left ? RE::ActorValue::kLeftItemCharge : RE::ActorValue::kRightItemCharge, cost);
+						}
+					}
+					break;
 				case proto::kEvSoulTrapped:
 					Workbench::SoulTrapped(a_player, ev.flags);  // SkyCraft+ : soul trap on Minecraft mobs
 					break;
@@ -1369,7 +1384,25 @@ namespace skycraft
 				}
 				const float          reach = 3.0f * (weapon ? std::clamp(weapon->weaponData.reach, 0.5f, 2.0f) : 0.8f);
 				const std::uint16_t flags = (power ? proto::kSkyrimHitPower : 0) | (bash ? proto::kSkyrimHitBash : 0) | (left ? proto::kSkyrimHitLeft : 0);
-				Link::Get().PushInput(proto::kInSkyrimHit, flags, static_cast<std::int32_t>(damage * 100.0f), static_cast<std::int32_t>(reach * 100.0f));
+				// SkyCraft+ (v63): the weapon's own enchantment, if it has the charge for a hit: Minecraft acts it out on its
+				// mobs (kStoreEnchantInfo) and spends the charge if one was hit (kEvSpendCharge).
+				RE::FormID enchanted = 0;
+				if (weapon && !bash) {
+					auto* entry = player->GetEquippedEntryData(left);
+					auto* enchantment = entry ? entry->GetEnchantment() : nullptr;
+					if (!enchantment) {
+						enchantment = weapon->formEnchanting;
+					}
+					if (enchantment) {
+						const float cost = enchantment->data.costOverride > 0 ? static_cast<float>(enchantment->data.costOverride) : enchantment->CalculateMagickaCost(player);
+						const float charge = player->AsActorValueOwner()->GetActorValue(left ? RE::ActorValue::kLeftItemCharge : RE::ActorValue::kRightItemCharge);
+						if (charge >= cost) {
+							enchanted = enchantment->GetFormID();
+						}
+					}
+				}
+				Link::Get().PushInput(proto::kInSkyrimHit, flags, static_cast<std::int32_t>(damage * 100.0f), static_cast<std::int32_t>(reach * 100.0f),
+					static_cast<std::int32_t>(enchanted));
 				return RE::BSEventNotifyControl::kContinue;
 			}
 

@@ -293,7 +293,7 @@ public final class SkyNet {
 			case Act.POISON -> SkyPoison.coat(player, Math.max(0.0F, Math.min(act.a, 24.0F)));
 			// SkyCraft+ : a soul gem's charge into the Minecraft weapon's Skyrim enchantment (a: the charge).
 			case Act.RECHARGE -> dev.skycraft.craft.SkyEnchanting.recharge(player, Math.max(0.0F, Math.min(act.a, 3000.0F)));
-			case Act.SKYRIM_HIT -> SkyCombat.skyrimMelee(player, act.code, Math.max(0.0F, Math.min(act.a, 1000.0F)), Math.max(0.0F, Math.min(act.b, 8.0F)));
+			case Act.SKYRIM_HIT -> SkyCombat.skyrimMelee(player, act.code, Math.max(0.0F, Math.min(act.a, 1000.0F)), Math.max(0.0F, Math.min(act.b, 8.0F)), act.face);  // (SkyCraft+ : face, the weapon's enchantment)
 			case Act.HANDS -> GUEST_HANDS.put(player.getUUID(), act.code & 0xFFFF03);
 			case Act.SELF -> dev.skycraft.combat.SkyShouts.guestSelf(player, act.code & 0xFF);  // SkyCraft+ : the shouts on a guest
 			// SkyCraft+ : Skyrim weapons break blocks. The swing landed on this Minecraft block.

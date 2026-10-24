@@ -231,6 +231,55 @@ public final class SkyEnchanting {
 		});
 		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> trapped(entity));
 		ServerTickEvents.END_SERVER_TICK.register(SkyEnchanting::spellTick);
+		net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.serverboundPlay().register(SkyrimWeaponEnchant.TYPE, SkyrimWeaponEnchant.CODEC);
+		net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(SkyrimWeaponEnchant.TYPE, (payload, context) -> {
+			if (payload.formId() != 0 && SKYRIM_WEAPON_EFFECTS.size() < 4096) {
+				SKYRIM_WEAPON_EFFECTS.put(payload.formId(), payload.effects());
+			}
+		});
+	}
+
+	/**
+	 * SkyCraft+ : Skyrim weapons' own enchantments on Minecraft's mobs. Client -> server: what a Skyrim enchantment does
+	 * (its effects, "kind magnitude seconds;...", Skyrim's answer to Proto.STORE_ENCHANT_INFO), sent before a hit with it.
+	 */
+	public record SkyrimWeaponEnchant(int formId, String effects) implements net.minecraft.network.protocol.common.custom.CustomPacketPayload {
+		public static final Type<SkyrimWeaponEnchant> TYPE = new Type<>(net.minecraft.resources.Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "skyrim_weapon_enchant"));
+		public static final StreamCodec<RegistryFriendlyByteBuf, SkyrimWeaponEnchant> CODEC = StreamCodec.of((buf, e) -> {
+			buf.writeInt(e.formId);
+			buf.writeUtf(e.effects, 128);
+		}, buf -> new SkyrimWeaponEnchant(buf.readInt(), buf.readUtf(128)));
+
+		@Override
+		public Type<? extends net.minecraft.network.protocol.common.custom.CustomPacketPayload> type() {
+			return TYPE;
+		}
+	}
+
+	/** Each Skyrim enchantment's effects, as its players' clients told them (SkyrimWeaponEnchant). */
+	private static final Map<Integer, String> SKYRIM_WEAPON_EFFECTS = new java.util.concurrent.ConcurrentHashMap<>();
+
+	/**
+	 * A Skyrim weapon whose own enchantment (formId, 0: none or out of charge) hit these Minecraft mobs (SkyCombat.skyrimMelee):
+	 * acted out on each as a Minecraft weapon's would be, and one hit's charge goes from it in the host's Skyrim. The Nordic
+	 * Sword of Fear did nothing to a zombie but knock it back.
+	 */
+	public static void skyrimWeaponHit(ServerPlayer player, List<LivingEntity> hit, int formId, boolean left) {
+		String effects = formId == 0 ? null : SKYRIM_WEAPON_EFFECTS.get(formId);
+		if (effects == null || effects.isEmpty() || hit.isEmpty()) {
+			return;
+		}
+		Enchant enchant = new Enchant(formId, effects, 0.0F, 0.0F, 0.0F);
+		List<LivingEntity> targets = List.copyOf(hit);
+		// After the weapon's own hit (which makes the target briefly unhurtable).
+		player.level().getServer().execute(() -> {
+			for (LivingEntity target : targets) {
+				strike(player, target, enchant);
+			}
+		});
+		if (SkyNet.isHost(player) && SkyLink.active()) {
+			SkyLink.pushEvent(Proto.EV_SPEND_CHARGE, 0, 0.0F, 0.0F, 0.0F, 0.0F, left ? 1 : 0);
+		}
 	}
 
 	/** The enchantment's hit on a target: Skyrim's own on Skyrim's people (the host's), acted out the Minecraft way on the rest. */

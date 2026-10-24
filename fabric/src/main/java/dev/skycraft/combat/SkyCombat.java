@@ -70,7 +70,7 @@ public final class SkyCombat {
 	 * attack everything in the arc, as the player's own attack (drops and experience). A bash
 	 * mostly pushes. Skyrim's NPCs aren't touched here: Skyrim hits those itself.
 	 */
-	public static void skyrimMelee(net.minecraft.server.level.ServerPlayer player, int flags, float damage, float reach) {
+	public static void skyrimMelee(net.minecraft.server.level.ServerPlayer player, int flags, float damage, float reach, int enchantment) {
 		var level = player.level();
 		boolean power = (flags & Proto.SKYRIM_HIT_POWER) != 0;
 		boolean bash = (flags & Proto.SKYRIM_HIT_BASH) != 0;
@@ -107,12 +107,14 @@ public final class SkyCombat {
 			targets = targets.subList(0, 1);
 		}
 		var source = player.damageSources().playerAttack(player);
+		java.util.List<LivingEntity> struck = new java.util.ArrayList<>();
 		double kx = net.minecraft.util.Mth.sin(player.getYRot() * (float) (Math.PI / 180.0));
 		double kz = -net.minecraft.util.Mth.cos(player.getYRot() * (float) (Math.PI / 180.0));
 		for (LivingEntity e : targets) {
 			float base = sweeping > 0 && e != first ? damage * sweeping / (sweeping + 1.0F) : damage;
 			float dealt = enchanted.isEmpty() ? base : net.minecraft.world.item.enchantment.EnchantmentHelper.modifyDamage(level, enchanted, e, source, base);
 			if (e.hurtServer(level, source, dealt)) {
+				struck.add(e);
 				float push = bash ? 1.2F : power ? 0.8F : 0.4F;
 				if (!enchanted.isEmpty()) {
 					push = net.minecraft.world.item.enchantment.EnchantmentHelper.modifyKnockback(level, enchanted, e, source, push);
@@ -123,7 +125,10 @@ public final class SkyCombat {
 				}
 			}
 		}
-		SkyCraft.LOG.info("SkyCraft: Skyrim {} hit {} Minecraft mob(s) for {}", bash ? "bash" : power ? "power attack" : "attack", targets.size(), damage);
+		// SkyCraft+ : the Skyrim weapon's own enchantment (its fear, fire, paralysis...) on the mobs it hit.
+		dev.skycraft.craft.SkyEnchanting.skyrimWeaponHit(player, struck, enchantment, (flags & Proto.SKYRIM_HIT_LEFT) != 0);
+		SkyCraft.LOG.info("SkyCraft: Skyrim {} hit {} Minecraft mob(s) for {}{}", bash ? "bash" : power ? "power attack" : "attack", targets.size(), damage,
+			enchantment != 0 ? String.format(" (its enchantment %08X)", enchantment) : "");
 	}
 
 	/** SkyCraft+ : hand ownership. The host's hands Skyrim holds (set by the client each frame). */

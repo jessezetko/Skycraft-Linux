@@ -13,7 +13,7 @@
 namespace skycraft::proto
 {
 	inline constexpr std::uint32_t kMagic = 0x43594B53;  // "SKYC"
-	inline constexpr std::uint32_t kVersion = 62;  // SkyCraft+ : v50, KotIsOff's atlas in bands (kRenAtlasChunk); v51, Skyrim mode's collision and lock-on (kWeMob, kSkySkyrimControl); v52, kSkyItemDestroy; v53, taming and feeding (kEvTame, kEvGrowBaby, kActorTamed); v54, Minecraft's things at Skyrim's workbenches (SkyState::workbench, kStoreLendGear/kStoreReturnGear, kEvEnchantHit); v55, arrows across the games (kShotArrow), Skyrim mode's Activate (McState::useDistance); v56, the SkyCraft+ settings screen (SkySettingsText, SettingsEdit); v57, every shout in Minecraft mode (kShotParalyze..kShotWither, SkyrimShot::seconds, SkyState::selfEffects); v58, Skyrim geo (kRenSkyrimTexture, kStoreTextureAt, kSkyGeo); v59, beds (kEvSlept, kEvGoToBed), bow enchantments (kEvBowEnchants); v60, Minecraft arrows on the Skyrim bow (kEvBowEnchants flag 4); v61, kShotLent, Skyrim arrows from a Minecraft bow (kWeSkyrimArrow), Skyrim blocks' item pictures (kStoreTexturePicture); v62, Skyrim music discs (kEvJukebox), soul trap on Minecraft mobs (kEvSoulTrapped), Minecraft enchantments on Skyrim weapons against Skyrim's people (kEvMeleeEnchants), Skyrim's workbenches taken and placed (kDigWorkbench, kStoreTakeWorkbench, kEvPlaceWorkbench), the Overworld Portal's world (kDimOverworld, kMcInVillage)
+	inline constexpr std::uint32_t kVersion = 63;  // SkyCraft+ : v50, KotIsOff's atlas in bands (kRenAtlasChunk); v51, Skyrim mode's collision and lock-on (kWeMob, kSkySkyrimControl); v52, kSkyItemDestroy; v53, taming and feeding (kEvTame, kEvGrowBaby, kActorTamed); v54, Minecraft's things at Skyrim's workbenches (SkyState::workbench, kStoreLendGear/kStoreReturnGear, kEvEnchantHit); v55, arrows across the games (kShotArrow), Skyrim mode's Activate (McState::useDistance); v56, the SkyCraft+ settings screen (SkySettingsText, SettingsEdit); v57, every shout in Minecraft mode (kShotParalyze..kShotWither, SkyrimShot::seconds, SkyState::selfEffects); v58, Skyrim geo (kRenSkyrimTexture, kStoreTextureAt, kSkyGeo); v59, beds (kEvSlept, kEvGoToBed), bow enchantments (kEvBowEnchants); v60, Minecraft arrows on the Skyrim bow (kEvBowEnchants flag 4); v61, kShotLent, Skyrim arrows from a Minecraft bow (kWeSkyrimArrow), Skyrim blocks' item pictures (kStoreTexturePicture); v62, Skyrim music discs (kEvJukebox), soul trap on Minecraft mobs (kEvSoulTrapped), Minecraft enchantments on Skyrim weapons against Skyrim's people (kEvMeleeEnchants), Skyrim's workbenches taken and placed (kDigWorkbench, kStoreTakeWorkbench, kEvPlaceWorkbench), the Overworld Portal's world (kDimOverworld, kMcInVillage); v63, Skyrim weapons' own enchantments on Minecraft's mobs (kInSkyrimHit c, kStoreEnchantInfo, kEvSpendCharge)
 	inline constexpr wchar_t       kMappingName[] = L"Local\\SkyCraft_v1";
 
 	// 1 Minecraft block == 70 Skyrim units (Skyrim player ~128 units tall, MC player 1.8 blocks).
@@ -351,7 +351,8 @@ namespace skycraft::proto
 		kInUse = 9,          // Skyrim mode: Skyrim's Activate found nothing; use the Minecraft block the
 		                     // player looks at by hand (doors, chests, crafting tables, levers)
 		kInSkyrimHit = 10,   // a Skyrim melee hit landed (its HitFrame): code = SkyrimHitFlags, a = Minecraft damage * 100,
-		                     // b = reach in blocks * 100. Minecraft hits the mob(s) in front of the player
+		                     // b = reach in blocks * 100. Minecraft hits the mob(s) in front of the player. SkyCraft+ (v63):
+		                     // c = the weapon's enchantment (EnchantmentItem) if it has the charge for a hit, else 0
 		kInHeal = 11,        // a Skyrim healing effect healed the player: a = share of max health * 10000
 		kInSlotJump = 12,    // SkyCraft+ : v34. In a screen with slots, the cursor jumps to the next slot that way:
 		                     // a = x step (-1, 0, 1), b = y step (down is +1)
@@ -474,6 +475,8 @@ namespace skycraft::proto
 		kEvMeleeEnchants = 25,   // SkyCraft+ (v62): Minecraft enchantments on the Skyrim weapons in hand, which their hits on Skyrim's
 		                         // people act out: flags, the right hand's in bits 0-15 and the left's in 16-31, each: Sharpness
 		                         // bits 0-2, Smite 3-5, Bane of Arthropods 6-8, Fire Aspect 9-10, Knockback 11-12
+		kEvSpendCharge = 26,     // SkyCraft+ (v63): the enchanted Skyrim weapon in a hand hit Minecraft mob(s) (kInSkyrimHit c):
+		                         // one hit's charge goes from it (flags: 0 the right hand's, 1 the left's)
 	};
 
 	// SkyCraft+ : what a click on a Skyrim item does (McEvent::flags of kEvSkyItem).
@@ -1162,6 +1165,8 @@ namespace skycraft::proto
 		kStoreTakeWorkbench = 8,   // SkyCraft+ (v62): take the Skyrim workbench nearest the point in health/charge/bits of soul (MC
 		                           // x, y, z): it's gone from Skyrim's world; kStoreOk, formId the furniture, kind its bench type,
 		                           // name its name; kStoreNone: none there
+		kStoreEnchantInfo = 9,     // SkyCraft+ (v63): what the enchantment formId does: kStoreOk, name its effects as "kind
+		                           // magnitude seconds;..." (as kStoreReturnGear's), formId it; kStoreNone: not an enchantment
 	};
 
 	// SkyCraft+ (v54): what a Minecraft thing at Skyrim's enchanter stands as (SkyStoreRequest::soul of kStoreLendGear).

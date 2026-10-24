@@ -1117,6 +1117,26 @@ namespace skycraft::SkyInventory
 					result.kind = static_cast<std::uint8_t>(kind);
 					std::strncpy(result.name, name.c_str(), sizeof(result.name) - 1);
 					unsent.push_back(result);
+				} else if (request.op == proto::kStoreEnchantInfo) {
+					// SkyCraft+ (v63): what an enchantment does, for Minecraft to act out on its mobs (a Skyrim weapon's own).
+					auto*                 enchantment = RE::TESForm::LookupByID<RE::EnchantmentItem>(request.formId);
+					proto::SkyStoreResult result = Refusal(request.id, enchantment ? proto::kStoreOk : proto::kStoreNone);
+					if (enchantment) {
+						std::string effects;
+						for (auto* effect : enchantment->effects) {
+							const char* kind = effect ? Workbench::EffectKind(effect->baseEffect) : nullptr;
+							if (kind) {
+								std::string one = std::format("{}{} {:.0f} {}", effects.empty() ? "" : ";", kind, effect->GetMagnitude(), effect->GetDuration());
+								if (effects.size() + one.size() < sizeof(result.name)) {
+									effects += one;
+								}
+							}
+						}
+						result.formId = enchantment->GetFormID();
+						std::memcpy(result.name, effects.c_str(), std::min(effects.size() + 1, sizeof(result.name)));
+						logger::info("enchantments: {} ({:08X}) on Minecraft's mobs: {}", enchantment->GetName(), enchantment->GetFormID(), effects);
+					}
+					unsent.push_back(result);
 				} else if (request.op == proto::kStoreTextureAt) {
 					// SkyCraft+ : Skyrim geo. Which texture a dug surface has (the point in health, charge and soul's bits).
 					int        kind = 0;

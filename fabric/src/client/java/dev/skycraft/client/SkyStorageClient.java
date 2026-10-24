@@ -290,7 +290,7 @@ public final class SkyStorageClient {
 		}
 		for (SkyLink.StoreResult result : SkyLink.popStoreResults()) {
 			if (SkyLendingClient.onStoreResult(result) || SkyGeoClient.onStoreResult(result) || SkyBlockItemRenderer.onStoreResult(result)
-				|| SkyWorkbenchesClient.onStoreResult(result)) {
+				|| SkyWorkbenchesClient.onStoreResult(result) || SkyHandEnchantsClient.onStoreResult(result)) {
 				continue;  // SkyCraft+ : lent to a Skyrim workbench; Skyrim geo's texture
 			}
 			String pictureOf = PICTURE_ASKS.remove(result.id());
