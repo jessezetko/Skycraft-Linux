@@ -8,7 +8,6 @@ import java.util.HashSet;
 import java.util.Set;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
-import net.minecraft.tags.ItemTags;
 import net.minecraft.world.item.ItemStack;
 
 /**
@@ -23,25 +22,28 @@ public final class SkyWorkbenchesClient {
 	private static final Set<Integer> ASKED = new HashSet<>();
 
 	public static void init() {
-		SkyWorkbenches.clientPlace = (formId, pos, yaw) -> {
+		SkyWorkbenches.clientPlace = (formId, pos, footY, yaw) -> {
 			if (!SkyClient.linked() || !dev.skycraft.SkySettings.flag("skyrimWorkbenchesTaken", true)) {
 				return false;
 			}
-			SkyLink.pushEvent(Proto.EV_PLACE_WORKBENCH, formId, pos.getX() + 0.5f, pos.getY(), pos.getZ() + 0.5f, yaw, 0);
+			SkyLink.pushEvent(Proto.EV_PLACE_WORKBENCH, formId, pos.getX() + 0.5f, (float) footY, pos.getZ() + 0.5f, yaw, 0);
 			return true;
 		};
 	}
 
-	/** A cell came out (SkyDigClient): a workbench's, with a pickaxe, is taken whole instead (true). */
+	/**
+	 * A cell came out (SkyDigClient): a workbench's is taken whole instead (true). With whatever mined it:
+	 * asked for with a pickaxe, but one not taken for a pickaxe (what a Skyrim hand stands in as) came
+	 * out as a crafting table, the workbench lost.
+	 */
 	static boolean mined(Minecraft minecraft, ItemStack tool, int material, double x, double y, double z) {
 		if (material != Proto.DIG_WORKBENCH || minecraft.player == null || !dev.skycraft.SkySettings.flag("skyrimWorkbenchesTaken", true)) {
 			return false;
 		}
 		ItemStack used = tool != null ? tool : minecraft.player.getMainHandItem();
-		if (!used.is(ItemTags.PICKAXES)) {
-			return false;
-		}
 		int id = SkyLink.pushStoreRequest(Proto.STORE_TAKE_WORKBENCH, 0, 0, (float) x, (float) y, Float.floatToRawIntBits((float) z), 0, "");
+		dev.skycraft.SkyCraft.LOG.info("SkyCraft: a Skyrim workbench mined (with {}{}): asking Skyrim for it whole{}", used.isEmpty() ? "a bare hand" : used.getHoverName().getString(),
+			tool != null ? ", a Skyrim weapon's stand-in" : "", id == 0 ? " (the request queue is full)" : "");
 		if (id == 0) {
 			return false;
 		}

@@ -204,6 +204,11 @@ namespace skycraft::Workbench
 		return base && (BenchOf(a_ref) || IsLook(base->GetFormID()));
 	}
 
+	bool IsPlaced(RE::TESObjectREFR* a_ref)
+	{
+		return a_ref && (a_ref->GetFormID() >> 24) == 0xFF && IsWorkbenchPart(a_ref);
+	}
+
 	RE::FormID Take(RE::PlayerCharacter* a_player, float a_x, float a_y, float a_z, std::string& a_name, int& a_kind)
 	{
 		auto* tes = RE::TES::GetSingleton();

@@ -26,7 +26,7 @@ import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.context.UseOnContext;
 
 /**
- * Skyrim's workbenches as things to carry: one mined with a pickaxe (a Skyrim one or Minecraft's) is
+ * Skyrim's workbenches as things to carry: one mined (with a pickaxe, or anything: SkyWorkbenchesClient) is
  * taken out of Skyrim's world whole (its client asks Skyrim, Proto.STORE_TAKE_WORKBENCH) and comes as
  * this item; used on a block it stands there in Skyrim again (Proto.EV_PLACE_WORKBENCH), kept in
  * the save, and works as ever. Each can also be made at Minecraft's crafting table (data/skycraft/
@@ -49,11 +49,12 @@ public final class SkyWorkbenches extends Item {
 	private static final String[] KIND_LOOKS = { "crafting_table", "blast_furnace", "grindstone", "enchanting_table", "enchanting_table", "brewing_stand", "brewing_stand", "smithing_table" };
 
 	/** The client's side (SkyWorkbenchesClient): tells its Skyrim to stand the workbench there. */
-	public static volatile PlaceHook clientPlace = (formId, pos, yaw) -> false;
+	public static volatile PlaceHook clientPlace = (formId, pos, footY, yaw) -> false;
 
 	@FunctionalInterface
 	public interface PlaceHook {
-		boolean place(int formId, BlockPos pos, float yaw);
+		/** footY: the height it stands at (where the click landed on a top face: Skyrim's ground runs through its cell). */
+		boolean place(int formId, BlockPos pos, double footY, float yaw);
 	}
 
 	private SkyWorkbenches(Item.Properties properties) {
@@ -127,7 +128,9 @@ public final class SkyWorkbenches extends Item {
 		}
 		BlockPos at = context.getClickedPos().relative(context.getClickedFace());
 		if (context.getLevel().isClientSide()) {
-			return clientPlace.place(formId, at, context.getPlayer().getYRot()) ? InteractionResult.SUCCESS : InteractionResult.FAIL;
+			// On a top face, where the click landed: Skyrim's ground lies inside its cell (stood on the cell above, it floated).
+			double footY = context.getClickedFace() == net.minecraft.core.Direction.UP ? Math.min(context.getClickLocation().y, at.getY()) : at.getY();
+			return clientPlace.place(formId, at, footY, context.getPlayer().getYRot()) ? InteractionResult.SUCCESS : InteractionResult.FAIL;
 		}
 		if (!context.getPlayer().getAbilities().instabuild) {
 			context.getItemInHand().shrink(1);

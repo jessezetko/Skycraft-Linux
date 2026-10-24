@@ -730,7 +730,8 @@ namespace skycraft::Dig
 			if (it != a_refs.end()) {
 				return it->second;
 			}
-			const float up = !IsDiggableRef(ref) ? kNotDiggable : HasCollision(ref->Get3D()) ? 0.0f : kOverlayReach;
+			// (SkyCraft+ : a workbench the player placed stands whole: put down where they had dug, it was cut away.)
+			const float up = !IsDiggableRef(ref) || Workbench::IsPlaced(ref) ? kNotDiggable : HasCollision(ref->Get3D()) ? 0.0f : kOverlayReach;
 			a_refs.emplace(ref, up);
 			return up;
 		}
@@ -964,6 +965,11 @@ namespace skycraft::Dig
 			tes->ForEachReferenceInRange(a_player, kScanRadiusBlocks * float(proto::kUnitsPerBlock), [&](RE::TESObjectREFR* a_ref) {
 				// Disabled or unloading references' 3D may be on its way out: leave it alone.
 				if (!a_ref || a_ref == a_player || a_ref->IsDisabled() || a_ref->IsDeleted() || !a_ref->Is3DLoaded()) {
+					return RE::BSContainer::ForEachResult::kContinue;
+				}
+				// SkyCraft+ : a workbench the player placed stays (in a village it was taken for Skyrim's and
+				// hidden, only its lights left).
+				if (Workbench::IsPlaced(a_ref)) {
 					return RE::BSContainer::ForEachResult::kContinue;
 				}
 				auto* root = a_ref->Get3D();
