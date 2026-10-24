@@ -1406,6 +1406,28 @@ namespace skycraft
 			return parked;
 		}
 
+		// SkyCraft+ : the Overworld Portal's world. Minecraft's clock follows Skyrim's there, and Skyrim's runs at 20
+		// times real time: a day lasted 72 minutes, a night half an hour ("the time didn't move"). While there, Skyrim's
+		// TimeScale is Minecraft's ([Worlds] fOverworldTimeScale; 0 leaves it), and as it was again after.
+		void OverworldClock(bool a_there)
+		{
+			static float before = -1.0f;
+			const float  want = State().overworldTimeScale;
+			auto*        scale = RE::TESForm::LookupByID<RE::TESGlobal>(0x3A);  // TimeScale
+			if (!scale || want <= 0.0f) {
+				return;
+			}
+			if (a_there && before < 0.0f) {
+				before = scale->value == want ? 20.0f : scale->value;  // (a save made there: Skyrim's own)
+				scale->value = want;
+				logger::info("Minecraft's overworld: Skyrim's time scale {} -> {} (Minecraft's day length)", before, want);
+			} else if (!a_there && before >= 0.0f) {
+				scale->value = before;
+				logger::info("Skyrim's time scale back to {}", before);
+				before = -1.0f;
+			}
+		}
+
 		void PerFrame(RE::PlayerCharacter* a_player, float a_delta)
 		{
 			auto& st = State();
@@ -1706,7 +1728,8 @@ namespace skycraft
 			LootSpots::PerFrame(a_player, a_delta);  // SkyCraft+
 			Crops::PerFrame(a_delta);  // SkyCraft+
 			MusicDiscs::PerFrame();  // SkyCraft+
-			Workbench::PerFrame();   // SkyCraft+ : placed workbenches face the player
+			Workbench::FacePlaced();  // SkyCraft+ : placed workbenches face the player
+			OverworldClock(st.parked && st.mcWorld == proto::kDimOverworld);  // SkyCraft+ : Minecraft's day length there
 			MapMarkers::PerFrame(a_player, a_delta);  // SkyCraft+
 			SkyInventory::PerFrame(a_player, haveMc && (mc.flags & proto::kMcWantsSkyInventory) != 0, a_delta);  // SkyCraft+
 			Workbench::PerFrame(a_delta);  // SkyCraft+

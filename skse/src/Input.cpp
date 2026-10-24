@@ -178,6 +178,7 @@ namespace skycraft
 			State().overworldNight = formList("sOverworldNight", "0xB83C2, 0x42297, 0x42293, 0x42266, 0xFE2D5, 0x41FB6");
 			State().overworldVillage = formList("sOverworldVillage", "0xBBCD2, 0xB5D5A, 0x1034E4, 0x1034E6, 0x106A61, 0xC6013, 0xE7B2C");
 			State().skyrimModeInOverworld = ini.GetBoolValue("Worlds", "bSkyrimModeInOverworld", true);  // SkyCraft+
+			State().overworldTimeScale = static_cast<float>(ini.GetDoubleValue("Worlds", "fOverworldTimeScale", 72.0));  // SkyCraft+
 			State().enemyCap = static_cast<int>(ini.GetLongValue("Worlds", "iEnemyCap", 6));
 			State().enemySeconds = static_cast<float>(ini.GetDoubleValue("Worlds", "fEnemySeconds", 12.0));
 			State().structureMarkersOption = ini.GetBoolValue("Worlds", "bStructureMarkers", true);
