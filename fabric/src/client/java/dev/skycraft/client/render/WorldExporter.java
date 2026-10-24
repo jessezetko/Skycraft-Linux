@@ -244,6 +244,7 @@ public final class WorldExporter {
 			SkyCraft.LOG.error("SkyCraft: watching doors and gates failed; blocks still go to Skyrim", e);
 		}
 		meshDirtySections(level);
+		sweepUnsent(minecraft, level);
 		long t2 = System.nanoTime();
 		forgetFar(minecraft);
 		// Animated textures (water, lava, fire, ...): the frame for this game tick.
@@ -261,6 +262,52 @@ public final class WorldExporter {
 			SkyCraft.LOG.info("SkyCraft: slow frame: {} ms since the last (ours: {} ms resend{}, {} ms meshing {} sections of {} waiting, {} ms forget/animate, {} ms entities)",
 				gap / 1_000_000L, (t1 - t0) / 1_000_000L, resent ? "" : " (none)", (t2 - t1) / 1_000_000L, meshedTotal - meshedBefore, dirtyBefore,
 				(t3 - t2) / 1_000_000L, (t4 - t3) / 1_000_000L);
+		}
+	}
+
+	/**
+	 * SkyCraft+ : the Overworld's holes. Once a second, each loaded section round the player with blocks in it
+	 * that Skyrim was never sent (and isn't waiting) is queued. In Minecraft's own overworld whole sections
+	 * went unsent, holes in the ground till a block was broken in them (with the queue long, a section whose
+	 * chunk hadn't arrived yet was let go, and nothing asked for it again).
+	 */
+	private static int sweepFrames, sweepLogged;
+	/** Sections with blocks but nothing of them to draw (all invisible): not queued again by the sweep. */
+	private static final LongOpenHashSet BARE = new LongOpenHashSet();
+
+	private static void sweepUnsent(Minecraft minecraft, ClientLevel level) {
+		if (++sweepFrames % 60 != 0 || minecraft.player == null) {
+			return;
+		}
+		int radius = minecraft.options.getEffectiveRenderDistance();
+		int pcx = SectionPos.blockToSectionCoord(minecraft.player.getBlockX()), pcz = SectionPos.blockToSectionCoord(minecraft.player.getBlockZ());
+		int queued = 0;
+		for (int dx = -radius; dx <= radius; dx++) {
+			for (int dz = -radius; dz <= radius; dz++) {
+				LevelChunk chunk = level.getChunkSource().getChunk(pcx + dx, pcz + dz, ChunkStatus.FULL, false);
+				if (chunk == null) {
+					continue;
+				}
+				LevelChunkSection[] sections = chunk.getSections();
+				for (int i = 0; i < sections.length; i++) {
+					if (sections[i] == null || sections[i].hasOnlyAir()) {
+						continue;
+					}
+					long key = SectionPos.asLong(pcx + dx, chunk.getSectionYFromSectionIndex(i), pcz + dz);
+					if (SENT.contains(key) || BARE.contains(key)) {
+						continue;
+					}
+					synchronized (DIRTY) {
+						if (DIRTY.add(key)) {
+							queued++;
+						}
+					}
+				}
+			}
+		}
+		if (queued > 0 && sweepLogged < 20) {
+			sweepLogged++;
+			SkyCraft.LOG.info("SkyCraft: {} loaded sections Skyrim was never sent queued again", queued);
 		}
 	}
 
@@ -338,6 +385,7 @@ public final class WorldExporter {
 		SkyCraft.LOG.info("SkyCraft: sent {}x{} texture atlas to Skyrim ({})", atlas.width, atlas.height, ok ? "ok" : "FAILED");
 		SkyGeoTextures.atlasSent(atlas);  // SkyCraft+ : Skyrim geo (its textures drawn into the new atlas)
 		SENT.clear();
+		BARE.clear();
 		LIT.clear();
 		SOLID.clear();
 		SHAPED.clear();
@@ -375,7 +423,9 @@ public final class WorldExporter {
 		// SkyCraft+ : the time is counted from here: counted from before the sorting, a hundred thousand
 		// waiting took the whole budget to sort, nothing was meshed again, and every block placed or
 		// broken stayed as it was in Skyrim (only its collision changed).
-		long deadline = System.nanoTime() + 3_000_000L;
+		// SkyCraft+ : the Overworld Portal's world. Its sections are full of blocks (each takes ms to mesh):
+		// more time a frame there, or it loaded slower than the player walked.
+		long deadline = System.nanoTime() + (dev.skycraft.client.SkyClient.inMinecraftWorld(Minecraft.getInstance()) ? 8_000_000L : 3_000_000L);
 		int meshed = 0;
 		long now = System.nanoTime();
 		for (int i = 0; i < order.length && meshed < SECTIONS_PER_FRAME && System.nanoTime() < deadline; i++) {
@@ -390,7 +440,10 @@ public final class WorldExporter {
 				// meshed again (a structure being placed, its ground laid and dug, dirtied the same
 				// sections tick after tick: each was meshed over and over, a frame's hitch each time).
 				// What the player just changed never waits.
-				if (!URGENT.contains(key) && now - MESHED_AT.getOrDefault(key, Long.MIN_VALUE / 2) < REMESH_AFTER_NANOS) {
+				// (One that took long to mesh, a structure's dug ground, waits longer: meshed again and again
+				// while a village was placed, each time a hitch.)
+				long wait = MESH_COST.get(key) > SLOW_MESH_NANOS ? SLOW_REMESH_AFTER_NANOS : REMESH_AFTER_NANOS;
+				if (!URGENT.contains(key) && now - MESHED_AT.getOrDefault(key, Long.MIN_VALUE / 2) < wait) {
 					continue;
 				}
 				if (!DIRTY.remove(key)) {
@@ -403,17 +456,22 @@ public final class WorldExporter {
 				meshedTotal++;
 				meshed++;
 				MESHED_AT.put(key, started);
+				MESH_COST.put(key, System.nanoTime() - started);
 			}
 			noteSlowSection(key, System.nanoTime() - started);
 		}
 		if (MESHED_AT.size() > 8192) {
-			MESHED_AT.long2LongEntrySet().removeIf(e -> now - e.getLongValue() > REMESH_AFTER_NANOS);
+			MESHED_AT.long2LongEntrySet().removeIf(e -> now - e.getLongValue() > SLOW_REMESH_AFTER_NANOS);
+			MESH_COST.keySet().retainAll(MESHED_AT.keySet());
 		}
 	}
 
 	/** SkyCraft+ : structure loading. When each section was last meshed (see meshDirtySections). */
 	private static final it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap MESHED_AT = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
 	private static final long REMESH_AFTER_NANOS = 400_000_000L;
+	/** SkyCraft+ : structure loading. How long each section's last mesh took; a slow one waits longer to be meshed again. */
+	private static final it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap MESH_COST = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
+	private static final long SLOW_MESH_NANOS = 20_000_000L, SLOW_REMESH_AFTER_NANOS = 2_000_000_000L;
 	/** SkyCraft+ : structure loading. Room left in the render ring below which no more is meshed this frame. */
 	private static final long RING_ROOM = 8L << 20;
 	/** SkyCraft+ : performance. Where a slow section's time went (the parts meshSection counts). */
@@ -746,6 +804,11 @@ public final class WorldExporter {
 		}
 		long p3 = System.nanoTime();
 		partWalls = p3 - p2;
+		if (!empty && MESH.vertexCount() == 0) {
+			BARE.add(key);  // (SkyCraft+ : sweepUnsent)
+		} else {
+			BARE.remove(key);
+		}
 		if (MESH.vertexCount() == 0 && !SENT.contains(key) && lightCount == 0 && !LIT.contains(key) && solidCount == 0 && !SOLID.contains(key) && dugCount == 0
 			&& !DUG.contains(key)) {
 			return true;

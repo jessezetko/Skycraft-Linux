@@ -584,10 +584,45 @@ public final class SkyDig {
 			return new AABB(minX - SEARCH, minY - SEARCH, minZ - SEARCH, maxX + SEARCH, maxY + SEARCH + LAND_REACH, maxZ + SEARCH);
 		}
 
+		/** The source's surfaces by block column (x, z) they reach over: their places in it. */
+		private final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<it.unimi.dsi.fastutil.ints.IntArrayList> sourceColumns =
+			new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
+
 		/** Gathers from these (originalSurfacesNear over a reach holding every later box) from now on; null: Skyrim's regions. */
 		public Probe from(@Nullable List<SkyTri> source) {
 			this.source = source;
+			this.sourceColumns.clear();
+			if (source != null) {
+				for (int i = 0; i < source.size(); i++) {
+					SkyTri t = source.get(i);
+					for (int x = (int) Math.floor(t.minX); x <= (int) Math.floor(t.maxX); x++) {
+						for (int z = (int) Math.floor(t.minZ); z <= (int) Math.floor(t.maxZ); z++) {
+							this.sourceColumns.computeIfAbsent(BlockPos.asLong(x, 0, z), k -> new it.unimi.dsi.fastutil.ints.IntArrayList()).add(i);
+						}
+					}
+				}
+			}
 			return this;
+		}
+
+		// The land by block column (built the first time it's asked for, after each around): landHeight
+		// looked through all of a section's land for each point.
+		private final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<List<SkyTri>> landColumns = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
+		private boolean landIndexed;
+
+		/** The land that reaches over block column (x, z), in the land's order. */
+		public List<SkyTri> landColumn(int x, int z) {
+			if (!this.landIndexed) {
+				this.landIndexed = true;
+				for (SkyTri t : this.land) {
+					for (int cx = (int) Math.floor(t.minX); cx <= (int) Math.floor(t.maxX); cx++) {
+						for (int cz = (int) Math.floor(t.minZ); cz <= (int) Math.floor(t.maxZ); cz++) {
+							this.landColumns.computeIfAbsent(BlockPos.asLong(cx, 0, cz), k -> new ArrayList<>()).add(t);
+						}
+					}
+				}
+			}
+			return this.landColumns.getOrDefault(BlockPos.asLong(x, 0, z), List.of());
 		}
 
 		/** Gathers the surfaces around a box (MC coords) once, for many tests inside it. */
@@ -598,6 +633,8 @@ public final class SkyDig {
 			this.column = null;
 			this.columns.clear();
 			this.nearCells.clear();
+			this.landColumns.clear();
+			this.landIndexed = false;
 			this.boxMinX = minX;
 			this.boxMinY = minY;
 			this.boxMinZ = minZ;
@@ -609,7 +646,24 @@ public final class SkyDig {
 			if (this.source == null) {
 				SkyCollision.originalSurfacesNear(box, this.gathered);
 			} else {
-				for (SkyTri t : this.source) {
+				// Only those over the box's columns, in the source's order (as if all of it were looked through).
+				it.unimi.dsi.fastutil.ints.IntOpenHashSet seen = new it.unimi.dsi.fastutil.ints.IntOpenHashSet();
+				it.unimi.dsi.fastutil.ints.IntArrayList picked = new it.unimi.dsi.fastutil.ints.IntArrayList();
+				for (int x = (int) Math.floor(box.minX); x <= (int) Math.floor(box.maxX); x++) {
+					for (int z = (int) Math.floor(box.minZ); z <= (int) Math.floor(box.maxZ); z++) {
+						it.unimi.dsi.fastutil.ints.IntArrayList at = this.sourceColumns.get(BlockPos.asLong(x, 0, z));
+						if (at != null) {
+							for (int k = 0; k < at.size(); k++) {
+								if (seen.add(at.getInt(k))) {
+									picked.add(at.getInt(k));
+								}
+							}
+						}
+					}
+				}
+				it.unimi.dsi.fastutil.ints.IntArrays.quickSort(picked.elements(), 0, picked.size());
+				for (int k = 0; k < picked.size(); k++) {
+					SkyTri t = this.source.get(picked.getInt(k));
 					if (t.maxX >= box.minX && t.minX <= box.maxX && t.maxY >= box.minY && t.minY <= box.maxY && t.maxZ >= box.minZ && t.minZ <= box.maxZ) {
 						this.gathered.add(t);
 					}
@@ -631,7 +685,7 @@ public final class SkyDig {
 		/** The land's height at (x, z), or NaN where there's none near. */
 		public double landHeight(double x, double z) {
 			double best = Double.NaN;
-			for (SkyTri t : this.land) {
+			for (SkyTri t : this.land.size() > 16 ? landColumn((int) Math.floor(x), (int) Math.floor(z)) : this.land) {
 				double h = t.heightAt(x, z);
 				if (!Double.isNaN(h) && (Double.isNaN(best) || h > best)) {
 					best = h;
