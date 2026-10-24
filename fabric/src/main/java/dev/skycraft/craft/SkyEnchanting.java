@@ -207,7 +207,9 @@ public final class SkyEnchanting {
 				return InteractionResult.PASS;
 			}
 			if (enchant.max() > 0.0F && enchant.charge() < enchant.cost()) {
-				return InteractionResult.PASS;  // out of charge (a soul gem charges it)
+				// Out of charge (a soul gem charges it): said, or it looked like the enchantment didn't work.
+				server.sendOverlayMessage(Component.literal(weapon.getHoverName().getString() + " is out of charge (a soul gem recharges it)"));
+				return InteractionResult.PASS;
 			}
 			if (enchant.max() > 0.0F && enchant.cost() > 0.0F) {
 				apply(weapon, enchant.withCharge(enchant.charge() - enchant.cost()));
@@ -412,7 +414,12 @@ public final class SkyEnchanting {
 
 	/** Skyrim's "affects creatures up to level N" (the effect's magnitude), with most health standing in for level. */
 	private static boolean upTo(Mob mob, Effect effect) {
-		return effect.magnitude() <= 0.0F || mob.getMaxHealth() <= effect.magnitude() * 4.0F;
+		boolean up = effect.magnitude() <= 0.0F || mob.getMaxHealth() <= effect.magnitude() * 4.0F;
+		if (!up) {
+			SkyCraft.LOG.info("SkyCraft: {} too strong for {} (counts as level {}, the enchantment's up to {})", mob.getName().getString(), effect.kind(),
+				Math.round(mob.getMaxHealth() / 4.0F), Math.round(effect.magnitude()));
+		}
+		return up;
 	}
 
 	/** A mob under one of Skyrim's lasting spells: which, till when (game time), and who cast it. */
@@ -422,6 +429,7 @@ public final class SkyEnchanting {
 	private static final Map<Mob, Spell> SPELLS = new WeakHashMap<>();
 
 	private static void hold(Mob mob, String kind, int ticks, ServerPlayer caster) {
+		SkyCraft.LOG.info("SkyCraft: {} on {} for {} s", kind, mob.getName().getString(), ticks / 20);
 		if (kind.equals("soultrap") && SPELLS.get(mob) instanceof Spell other && !other.kind().equals("soultrap")) {
 			SOUL_TRAPPED.put(mob, new Spell(kind, mob.level().getGameTime() + ticks, caster.getUUID()));  // alongside another spell
 			return;
