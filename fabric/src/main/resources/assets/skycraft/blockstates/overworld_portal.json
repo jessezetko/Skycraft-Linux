@@ -1,10 +1,10 @@
 {
   "variants": {
     "axis=x": {
-      "model": "minecraft:block/nether_portal_ns"
+      "model": "skycraft:block/overworld_portal_ns"
     },
     "axis=z": {
-      "model": "minecraft:block/nether_portal_ew"
+      "model": "skycraft:block/overworld_portal_ew"
     }
   }
 }

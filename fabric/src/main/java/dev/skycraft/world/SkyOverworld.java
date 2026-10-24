@@ -52,6 +52,15 @@ public final class SkyOverworld extends NetherPortalBlock {
 		.strength(-1.0F).sound(SoundType.GLASS).lightLevel(state -> 11).setId(KEY)));
 	private static final int MAX = 21;
 
+	/**
+	 * The Overworld Portal the player last left Minecraft's overworld by: the way in comes out of it again (out of
+	 * the first one made, always, before: a new one built to leave by was never the way back).
+	 */
+	public static final net.fabricmc.fabric.api.attachment.v1.AttachmentType<BlockPos> LAST_PORTAL = net.fabricmc.fabric.api.attachment.v1.AttachmentRegistry.<BlockPos>builder()
+		.persistent(BlockPos.CODEC)
+		.copyOnDeath()
+		.buildAndRegister(Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "overworld_portal_left_by"));
+
 	/** Players standing in one of Minecraft's villages in the overworld (Proto.MC_IN_VILLAGE), checked each second. */
 	private static final Set<UUID> IN_VILLAGE = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
@@ -88,9 +97,19 @@ public final class SkyOverworld extends NetherPortalBlock {
 			if (level == null) {
 				return;
 			}
+			// About a village: on one of its pieces (a house, a path) or near one (only standing on one counted,
+			// and its people seldom came).
 			for (ServerPlayer player : level.players()) {
-				if (level.structureManager().getStructureWithPieceAt(player.blockPosition(), StructureTags.VILLAGE).isValid()) {
-					IN_VILLAGE.add(player.getUUID());
+				BlockPos at = player.blockPosition();
+				search:
+				for (int dx = -24; dx <= 24; dx += 12) {
+					for (int dz = -24; dz <= 24; dz += 12) {
+						BlockPos q = at.offset(dx, 0, dz);
+						if (level.hasChunkAt(q) && level.structureManager().getStructureWithPieceAt(q, StructureTags.VILLAGE).isValid()) {
+							IN_VILLAGE.add(player.getUUID());
+							break search;
+						}
+					}
 				}
 			}
 		});
@@ -195,6 +214,7 @@ public final class SkyOverworld extends NetherPortalBlock {
 			return null;
 		}
 		if (level.dimension() == OVERWORLD) {
+			player.setAttached(LAST_PORTAL, pos.immutable());
 			// Back to where they left Skyrim's world: into the portal they left by, else where it stood.
 			ServerLevel back = SkyMinecraftWorlds.leftLevel(player);
 			TeleportTransition there = back == null ? null : SkyMinecraftWorlds.intoOverworldPortalLeftBy(player, back);
@@ -210,6 +230,22 @@ public final class SkyOverworld extends NetherPortalBlock {
 		ServerLevel overworld = level.getServer().getLevel(OVERWORLD);
 		if (overworld == null) {
 			return null;
+		}
+		// Out of the portal they last left by, if it's still there.
+		BlockPos last = player.getAttached(LAST_PORTAL);
+		if (last != null) {
+			overworld.getChunk(last.getX() >> 4, last.getZ() >> 4);
+			BlockPos bottom = null;
+			for (BlockPos q : BlockPos.betweenClosed(last.offset(-2, -3, -2), last.offset(2, 3, 2))) {
+				if (overworld.getBlockState(q).is(PORTAL) && !overworld.getBlockState(q.below()).is(PORTAL) && (bottom == null || q.distSqr(last) < bottom.distSqr(last))) {
+					bottom = q.immutable();
+				}
+			}
+			if (bottom != null) {
+				SkyCraft.LOG.info("SkyCraft: into Minecraft's overworld by the Overworld Portal last left by, at {}", bottom.toShortString());
+				return new TeleportTransition(overworld, Vec3.atBottomCenterOf(bottom), Vec3.ZERO, player.getYRot(), 0.0F,
+					TeleportTransition.PLAY_PORTAL_SOUND.then(TeleportTransition.PLACE_PORTAL_TICKET));
+			}
 		}
 		// The same x and z, on the ground there; a portal back is made beside the player if there's none near.
 		int x = pos.getX(), z = pos.getZ();

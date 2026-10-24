@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:block/nether_portal_ew",
+  "textures": {
+    "particle": "skycraft:block/overworld_portal",
+    "portal": "skycraft:block/overworld_portal"
+  }
+}
