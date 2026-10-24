@@ -52,7 +52,7 @@ public final class SkyBoats {
 
 	/**
 	 * A boat paddled into a ledge in Skyrim's river (where it drops a little, a small waterfall):
-	 * lifted onto the water above, if that's no more than a block and a half up and there's room.
+	 * lifted onto the water above, if that's no more than three blocks up and there's room.
 	 * Minecraft's boats never step up (only what stands on the ground does); these got stuck at each.
 	 * Run where the boat is driven (its driver's client).
 	 */
@@ -62,16 +62,21 @@ public final class SkyBoats {
 		}
 		double yaw = Math.toRadians(boat.getYRot());
 		double fx = -Math.sin(yaw), fz = Math.cos(yaw);
-		double ahead = boat.getBbWidth() * 0.5 + 0.6;
-		double surface = SkyWater.surfaceAt((int) Math.floor(boat.getX() + fx * ahead), (int) Math.floor(boat.getZ() + fz * ahead));
-		double rise = surface - boat.getY();
-		if (Double.isNaN(surface) || rise <= 0.1 || rise > 1.6) {
+		// The water above the ledge, just past it or a little further (a fall's lip is often a block or two deep).
+		for (double past : new double[] { 0.6, 1.2, 1.8 }) {
+			double ahead = boat.getBbWidth() * 0.5 + past;
+			double surface = SkyWater.surfaceAt((int) Math.floor(boat.getX() + fx * ahead), (int) Math.floor(boat.getZ() + fz * ahead));
+			double rise = surface - boat.getY();
+			if (Double.isNaN(surface) || rise <= 0.1 || rise > 3.0) {
+				continue;
+			}
+			double step = past - 0.1;
+			if (!boat.level().noCollision(boat, boat.getBoundingBox().move(fx * step, rise + 0.05, fz * step))) {
+				continue;
+			}
+			boat.setPos(boat.getX() + fx * step, surface + 0.05, boat.getZ() + fz * step);
 			return;
 		}
-		if (!boat.level().noCollision(boat, boat.getBoundingBox().move(fx * 0.5, rise + 0.05, fz * 0.5))) {
-			return;
-		}
-		boat.setPos(boat.getX() + fx * 0.5, surface + 0.05, boat.getZ() + fz * 0.5);
 	}
 
 	/**
