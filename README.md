@@ -98,7 +98,25 @@ first, install the zip the same way, and start a **new Minecraft world** to get 
 - **Silk touch mines Skyrim's ground and rock** as blocks in that very Skyrim texture, to build
   with (`silkTouchSkyrimGeo`).
 - **The restoration brush** (craft it from a stick, cobblestone and dirt): use it on a hole you
-  dug in Skyrim's ground, rocks or cave walls and Skyrim's own land comes back there.
+  dug in Skyrim's ground, rocks or cave walls and Skyrim's own land comes back there. Used where you
+  took one of Skyrim's own workbenches, it puts the original back.
+- **The Overworld Portal:** build a Nether-portal-shaped frame of Minecraft dirt and light it with
+  flint and steel. The green portal leads to a normal Minecraft overworld with its own structures
+  and mobs, drawn by Skyrim, its day and night following Skyrim's clock. Come back through it to
+  where you left (`overworldPortal`).
+- **Take Skyrim's workbenches with you:** mine a forge, anvil, tanning rack, cooking pot, enchanter,
+  alchemy lab or the like and it drops whole, to place again anywhere, facing you
+  (`skyrimWorkbenchesTaken`).
+- **Skyrim music discs:** one for each of Skyrim's songs, on a creative tab of their own and found
+  in Skyrim's dungeon chests and dropped by creepers. A jukebox plays them with Skyrim's own music
+  paused (`skyrimMusicDiscs`).
+- **Enchantments across the games, part two:** Skyrim weapons' own enchantments (fear and the
+  like) work on Minecraft mobs, and so do Skyrim enchantments put on Minecraft weapons. Recharge a
+  Minecraft weapon by clicking a filled soul gem onto it in the inventory. Minecraft enchantments
+  on Skyrim weapons and armor (Sharpness, Feather Falling...) work, and a fresh copy of the same
+  item comes plain.
+- **Minecraft boats on Skyrim's water:** they float and paddle on Skyrim's rivers and lakes, and
+  climb small falls (`boatsOnSkyrimWater`).
 - **Pets, Minecraft style:** bones tame Skyrim's dogs and wolves. They're as tough as a tamed
   Minecraft wolf, fight what you hit, sit and stand when told, and come through load doors with
   you (`skyrimFoodForAnimals`, `petsThroughDoors`).
@@ -201,6 +219,8 @@ We know about these and are working on them:
 - Structures (beta) can sit oddly where they meet Skyrim's land: seams, slopes, bits of Skyrim
   showing through.
 - Two players in different interiors at the same time share the host's builds there.
+- Villages (and other big structures) still stutter as they load in, and a few of the stone
+  placeholders shown before a structure loads can stay behind.
 
 Made with the help of an AI coding assistant (Claude) and play-tested in game. Bug reports and
 ideas are welcome in [Issues](../../issues).
