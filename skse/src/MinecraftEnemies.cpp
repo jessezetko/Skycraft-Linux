@@ -340,7 +340,7 @@ namespace skycraft::MinecraftEnemies
 		// and their loot each time.)
 		const double fromCentre = std::sqrt(a_x * a_x + a_z * a_z);
 		const bool   endCities = a_world == proto::kDimEnd && fromCentre > (wasThere ? kEndCityBlocks - 50.0f : kEndCityBlocks);
-		const bool overworld = a_world == proto::kDimOverworld;  // SkyCraft+ : the Overworld Portal's world
+		const bool overworld = a_world == proto::kDimOverworld && st.overworldCreatures;  // SkyCraft+ : the Overworld Portal's world (bOverworldSkyrimCreatures)
 		const bool here = a_parked && st.skyrimEnemiesOption && (a_world == proto::kDimNether || endCities || overworld);
 		if (here != wasThere) {
 			wasThere = here;

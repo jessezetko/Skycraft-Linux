@@ -67,6 +67,7 @@ namespace skycraft
 		std::vector<RE::FormID>    overworldVillage;
 		bool                       skyrimModeInOverworld{ true };  // SkyCraft+ : K works there ([Worlds] bSkyrimModeInOverworld)
 		float                      overworldTimeScale{ 72.0f };    // SkyCraft+ : Skyrim's TimeScale there ([Worlds] fOverworldTimeScale; 0 leaves it)
+		bool                       overworldCreatures{ false };    // SkyCraft+ : Skyrim's creatures and people there ([Worlds] bOverworldSkyrimCreatures; experimental)
 		int                        enemyCap{ 6 };
 		float                      enemySeconds{ 12.0f };
 		// SkyCraft+ : Minecraft's structures marked on Skyrim's map and compass ([Worlds] bStructureMarkers).
